@@ -183,6 +183,26 @@
             ],
             "Type": "AspeedFan"
         },
+        {
+            "Bus": 1,
+            "Address": "0x2d",
+            "Labels": ["TSI0_TEMP", "TSI1_TEMP"],
+            "Name": "NCT6796D_Temp1",
+            "Name1": "NCT6796D_Temp2",
+            "Name2": "NCT6796D_Temp3",
+            "Name3": "NCT6796D_Temp4",
+            "Name4": "NCT6796D_Temp5",
+            "Name5": "NCT6796D_Temp6",
+            "Name6": "NCT6796D_Temp7",
+            "Name7": "NCT6796D_Temp8",
+            "Name8": "NCT6796D_Temp9",
+            "Name9": "NCT6796D_Temp10",
+            "Name10": "NCT6796D_Temp11",
+            "Name11": "NCT6796D_Temp12",
+            "Name12": "NCT6796D_TSI0_TEMP",
+            "Name13": "NCT6796D_TSI1_TEMP",
+            "Type": "NCT6779"
+        },
         {"Name": "BMC", "Type": "BMC"},
         {
             "Address": "$address",

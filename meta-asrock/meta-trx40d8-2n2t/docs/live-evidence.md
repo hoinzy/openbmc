@@ -297,3 +297,14 @@ instantiate the same driver automatically. These values prove the NCT6796D
 transport and driver path, but do not identify which TSI channel is TR1. That
 mapping must be correlated with the physical TR1 sensor before naming the
 channel or enabling closed-loop fan control.
+
+## BIOS configuration manager probe
+
+The updated image runs `biosconfig-manager` and exposes the standard
+`xyz.openbmc_project.BIOSConfig.Manager` object at
+`/xyz/openbmc_project/bios_config/manager`. Its `BaseBIOSTable` is empty,
+however, and Redfish therefore does not publish `Bios/Attributes`. This is
+expected for the manager alone: a PLDM or IPMI/host-firmware BIOS provider must
+populate the table. The original vendor BIOS JSON/XML files are not an
+OpenBMC provider and are not copied into the image without a transport and
+attribute-semantic mapping.
