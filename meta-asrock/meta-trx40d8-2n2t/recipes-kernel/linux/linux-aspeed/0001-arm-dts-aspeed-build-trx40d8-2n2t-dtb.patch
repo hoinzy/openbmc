@@ -32,7 +32,7 @@ new file mode 100644
 index 000000000000..000000000000
 --- /dev/null
 +++ b/arch/arm/boot/dts/aspeed/aspeed-bmc-asrock-trx40d8-2n2t.dts
-@@ -0,0 +1,49 @@
+@@ -0,0 +1,51 @@
 +// SPDX-License-Identifier: GPL-2.0+
 +/*
 + * Device tree for the ASRock Rack TRX40D8-2N2T.
