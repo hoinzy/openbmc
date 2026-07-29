@@ -271,3 +271,29 @@ returns an empty `PCIeDevices` collection and zero processor and memory
 counts. This is a missing host-inventory publication path; it is not evidence
 that the AST2500 PCI-to-AHB support is absent. The board layer currently
 publishes BMC board inventory, voltages, and fan tachometers only.
+
+The host OS is available again at the read-only audit boundary. Ubuntu reports
+an AMD x86_64 system with a Threadripper 3970X; `lspci -nn` lists the NVIDIA
+TU102 RTX 2080 Ti, Intel X710-AT2, AST1150 bridge and AST graphics function,
+ASM1061 SATA, and two Intel I225-LM NICs. Host hwmon currently exposes only
+AMD `k10temp`; no NCT6775 module was loaded during discovery. This gives the
+inventory work a concrete host-side source without pretending those devices
+are BMC-local PCI objects.
+
+## NCT6796D temperature probe
+
+The powered host left a responding but unbound device at BMC I2C1 address
+`0x2d`. A transient device declaration using the kernel's `nct6796` I2C
+profile created hwmon channels:
+
+```text
+TSI0_TEMP = 36500 mC
+TSI1_TEMP = 55750 mC
+```
+
+The temporary device was removed after the read-only probe. The permanent DTS
+node now declares `nuvoton,nct6796` at I2C1/`0x2d`, so the next image should
+instantiate the same driver automatically. These values prove the NCT6796D
+transport and driver path, but do not identify which TSI channel is TR1. That
+mapping must be correlated with the physical TR1 sensor before naming the
+channel or enabling closed-loop fan control.

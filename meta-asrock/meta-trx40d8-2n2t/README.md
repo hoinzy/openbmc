@@ -14,16 +14,17 @@ The vendor 1.30 image confirms:
 - the same ADC order, fan topology, KCS address, video, and USB building
   blocks as the upstream X570D4U device tree
 
-Live UART discovery found a board-specific I2C difference, so the layer now
-ships a dedicated device tree.  The 24C128 board EEPROM is at address `0x57`
+Live UART discovery found board-specific I2C differences, so the layer now
+ships a dedicated device tree. The 24C128 board EEPROM is at address `0x57`
 on I2C1; X570D4U places it on I2C7 and instead declares a temperature sensor
-on I2C1.
+on I2C1. The same bus exposes the NCT6796D monitoring interface at `0x2d`.
 
 The motherboard's `TR1` header is a 3-pin thermal-sensor input. ASRock's
 manual describes it as the system-TR temperature source, and the original
-BMC firmware can use it for fan curves. The current OpenBMC image does not
-expose it as a temperature sensor yet: the transport and driver path used by
-the original BMC still need to be identified.
+BMC firmware can use it for fan curves. A transient live probe with the
+NCT6796 profile exposed `TSI0_TEMP` and `TSI1_TEMP` through hwmon, proving the
+transport and driver path. Which TSI channel is wired to TR1 still needs a
+controlled hardware correlation, so neither channel is named `TR1` yet.
 
 ## Safety state
 

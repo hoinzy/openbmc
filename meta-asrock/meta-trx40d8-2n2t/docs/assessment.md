@@ -42,9 +42,12 @@ board-specific test record existed when this assessment was made.
 
 Live vendor-kernel scanning disproved a complete I2C match. X570D4U declares
 `w83773g@4c` on I2C1 and its EEPROM on I2C7. The TRX40 has no `0x4c` device on
-I2C1 and its physical board EEPROM is at I2C1 address `0x57`. A PCA9545-like
-device is present at I2C4 address `0x70` on both designs. TRX40 I2C3 contains
-seven responding addresses which are not yet assigned drivers.
+I2C1 and its physical board EEPROM is at I2C1 address `0x57`. The other I2C1
+responder at `0x2d` is the NCT6796D back-door monitoring interface: a
+transient `nct6796` probe exposed `TSI0_TEMP` at 36.5 C and `TSI1_TEMP` at
+55.75 C. A PCA9545-like device is present at I2C4 address `0x70` on both
+designs. TRX40 I2C3 contains seven responding addresses which are not yet
+assigned drivers.
 
 ## Implemented baseline
 
@@ -96,7 +99,7 @@ host-on test, so the upstream X570D4U pinctrl description remains unchanged.
 | Power/reset/state GPIO | powered-host pass validated GPIO ownership and power/reset/POST transitions; repeat on a clean boot and upstream the evidence | 1-2 days |
 | KCS, POST snoop, SOL | definitions exist; exercise full host lifecycle | 1-3 days |
 | Voltage sensors | channel map and thresholds implemented | 1-2 days target calibration |
-| Temperature sensors | TR1 is confirmed usable by the original BMC for fan curves, but its BMC transport/driver path and other sensor addresses remain unidentified | 4-10 days |
+| Temperature sensors | NCT6796D I2C path is identified and its two TSI channels are exposed by a transient probe; TR1 channel correlation and remaining sensors are still open | 2-6 days |
 | Pump/fan control | full-duty baseline safe; characterize outputs before PID | 3-7 days |
 | KVM/video | AST path exists; requires BIOS VGA switch and testing | 3-7 days |
 | KVM/USB stability | first S0 KVM use correlated with BMC RAM-boot reset/fallback and host USB `-71`; UART reproduction required | 2-5 days |

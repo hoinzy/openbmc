@@ -88,13 +88,13 @@ devices are declared yet for I2C3.
 - Device identities and sensor mapping for the seven I2C3 responders, including
   CPU, motherboard, card-side, TR1, and eight DIMM temperature sources.
 - The board manual identifies TR1 as a 3-pin thermal-sensor header and lists
-  system-TR temperature sensing in the hardware monitor. The live BMC image
-  has no TR1 hwmon channel, no identified temperature child on the scanned BMC
-  buses, and no `0x4c` device matching the inherited X570D4U temperature node.
-  The original BMC is confirmed to consume TR1 for fan-curve control, so this
-  is an OpenBMC transport/driver integration gap rather than proof that TR1 is
-  host-only. Trace the original BMC's Super-I/O, host-IPMI, or other management
-  path before adding a DTS node or sensor driver.
+  system-TR temperature sensing in the hardware monitor. The original BMC is
+  confirmed to consume TR1 for fan-curve control. A transient BMC probe of the
+  powered-board responder at I2C1 `0x2d` with the `nct6796` profile exposed
+  hwmon channels `TSI0_TEMP` (36.5 C) and `TSI1_TEMP` (55.75 C), identifying the
+  NCT6796D back-door transport. The permanent DTS node now declares this
+  device; correlate these channels against TR1 before assigning a user-facing
+  sensor name or fan policy.
 - Whether CPU temperature uses SB-TSI, PECI compatibility logic, or an
   external monitor.
 - The exact `BMC_READY`, PROCHOT, THERMTRIP, chassis-intrusion, POST-complete,
@@ -112,6 +112,10 @@ The board layer currently provides Entity Manager inventory for the BMC board,
 voltages, and fan tachometers only. Publishing host CPU, DIMM, PCI device, and
 PCIe-slot objects requires a host inventory provider and board-specific
 correlation; static slot names must not be substituted for discovered devices.
+The host OS is now available for that work: read-only `lspci -nn` shows the
+RTX 2080 Ti, Intel X710-AT2, AST1150 bridge/AST graphics, ASM1061 SATA
+controller, and Intel I225-LM NICs, while host hwmon currently exposes AMD
+`k10temp` only.
 
 ## Cooling invariant
 
