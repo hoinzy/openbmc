@@ -1,0 +1,82 @@
+From 2df1d7a64a3b8497b43dfc12bec00ba1521547e3 Mon Sep 17 00:00:00 2001
+From: Till Heinzerling <1684934+hoinzy@users.noreply.github.com>
+Date: Sun, 26 Jul 2026 12:30:00 +0200
+Subject: [PATCH] ARM: dts: aspeed: add ASRock Rack TRX40D8-2N2T
+
+Add the board device tree and its AST2500 DTB target. The board reuses the
+X570D4U wiring where it has been verified, but moves the board EEPROM from
+I2C7 to I2C1. It also associates the existing reserved framebuffer memory
+with the GFX controller, which is required by the ASPEED DRM driver.
+
+Upstream-Status: Pending
+Signed-off-by: Till Heinzerling <1684934+hoinzy@users.noreply.github.com>
+---
+ arch/arm/boot/dts/aspeed/Makefile                         |  1 +
+ .../dts/aspeed/aspeed-bmc-asrock-trx40d8-2n2t.dts         | 44 +++++++++++++++
+ 2 files changed, 45 insertions(+)
+
+diff --git a/arch/arm/boot/dts/aspeed/Makefile b/arch/arm/boot/dts/aspeed/Makefile
+index 371e5c0d0ce7..f76c9b609d8f 100644
+--- a/arch/arm/boot/dts/aspeed/Makefile
++++ b/arch/arm/boot/dts/aspeed/Makefile
+@@ -16,6 +16,7 @@ dtb-$(CONFIG_ARCH_ASPEED) += \
+ 	aspeed-bmc-asrock-romed8hm3.dtb \
+ 	aspeed-bmc-asrock-spc621d8hm3.dtb \
+ 	aspeed-bmc-asrock-x570d4u.dtb \
++	aspeed-bmc-asrock-trx40d8-2n2t.dtb \
+ 	aspeed-bmc-asus-kommando-ipmi-card.dtb \
+ 	aspeed-bmc-asus-x4tf.dtb \
+ 	aspeed-bmc-asus-x4tfb.dtb \
+diff --git a/arch/arm/boot/dts/aspeed/aspeed-bmc-asrock-trx40d8-2n2t.dts b/arch/arm/boot/dts/aspeed/aspeed-bmc-asrock-trx40d8-2n2t.dts
+new file mode 100644
+index 000000000000..000000000000
+--- /dev/null
++++ b/arch/arm/boot/dts/aspeed/aspeed-bmc-asrock-trx40d8-2n2t.dts
+@@ -0,0 +1,44 @@
++// SPDX-License-Identifier: GPL-2.0+
++/*
++ * Device tree for the ASRock Rack TRX40D8-2N2T.
++ *
++ * The board shares most of its AST2500 wiring with the X570D4U. The
++ * verified board-specific difference is the location of the board EEPROM.
++ */
++#include "aspeed-bmc-asrock-x570d4u.dts"
++
++/ {
++	model = "ASRock Rack TRX40D8-2N2T BMC";
++	compatible = "asrock,trx40d8-2n2t-bmc", "aspeed,ast2500";
++};
++
++&i2c7 {
++	/delete-node/ eeprom@57;
++};
++
++&i2c1 {
++	/delete-node/ w83773g@4c;
++
++	eeprom@57 {
++		compatible = "st,24c128", "atmel,24c128";
++		reg = <0x57>;
++		pagesize = <16>;
++
++		nvmem-layout {
++			compatible = "fixed-layout";
++			#address-cells = <1>;
++			#size-cells = <1>;
++
++			eth0_macaddress: macaddress@3f80 {
++				reg = <0x3f80 6>;
++			};
++
++			eth1_macaddress: macaddress@3f88 {
++				reg = <0x3f88 6>;
++			};
++		};
++	};
++};
++
++&gfx {
++	memory-region = <&gfx_memory>;
++};
+-- 
+2.50.1

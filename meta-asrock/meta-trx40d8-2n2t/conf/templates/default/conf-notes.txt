@@ -1,0 +1,7 @@
+Example build invocations:
+
+bitbake obmc-phosphor-image
+
+This target is an initial ASRock Rack TRX40D8-2N2T enablement. Do not flash
+an image until it has passed static validation and a complete recovery setup
+(UART plus an external SPI programmer and verified stock backup) is available.

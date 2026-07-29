@@ -1,0 +1,34 @@
+From 4d2f8f5bf0f3f0bcf30f7c590d5b4de5fdb1e2a4 Mon Sep 17 00:00:00 2001
+From: Till Heinzerling <1684934+hoinzy@users.noreply.github.com>
+Date: Tue, 28 Jul 2026 00:00:00 +0200
+Subject: [PATCH] nbd-proxy: drop incompatible nonetlink option
+
+The nbd-client supplied by the current OpenEmbedded nbd 3.27 recipe rejects
+the legacy -L/nonetlink argument when used with a Unix-socket export.  That
+causes nbd-proxy to exit before it can create the virtual-media gadget.
+
+The default netlink-enabled path works with the AST2500 kernel and still
+emits the nbd udev change event used by the state hook.  Do not pass -L for
+this Unix-socket connection.
+
+Upstream-Status: Pending
+Signed-off-by: Till Heinzerling <1684934+hoinzy@users.noreply.github.com>
+---
+ nbd-proxy.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/nbd-proxy.c b/nbd-proxy.c
+index 5fba2cd..5bf26c9 100644
+--- a/nbd-proxy.c
++++ b/nbd-proxy.c
+@@ -157,7 +157,7 @@ static int start_nbd_client(struct ctx* ctx)
+         dup2(fd, STDIN_FILENO);
+         dup2(fd, STDOUT_FILENO);
+         close(fd);
+
+-        execlp("nbd-client", "nbd-client", "-u", ctx->sock_path, "-n", "-L",
++        execlp("nbd-client", "nbd-client", "-u", ctx->sock_path, "-n",
+                "-t", timeout_str, ctx->config->nbd_device, NULL);
+         err(EXIT_FAILURE, "can't start ndb client");
+-- 
+2.50.1

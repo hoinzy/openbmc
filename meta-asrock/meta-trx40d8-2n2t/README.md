@@ -1,0 +1,61 @@
+# ASRock Rack TRX40D8-2N2T
+
+This layer is an initial OpenBMC port for the AST2500 BMC on the ASRock Rack
+TRX40D8-2N2T.
+
+The vendor 1.30 image confirms:
+
+- AST2500, 512 MiB DRAM with ECC enabled
+- 64 MiB SPI NOR flash
+- UART5 (`ttyS4`) at 115200 baud for the BMC console
+- KCS channel 3 at `0xca2`
+- one dedicated RGMII MAC and one RMII/NCSI MAC
+- 12 I2C controllers
+- the same ADC order, fan topology, KCS address, video, and USB building
+  blocks as the upstream X570D4U device tree
+
+Live UART discovery found a board-specific I2C difference, so the layer now
+ships a dedicated device tree.  The 24C128 board EEPROM is at address `0x57`
+on I2C1; X570D4U places it on I2C7 and instead declares a temperature sensor
+on I2C1.
+
+The motherboard's `TR1` header is a 3-pin thermal-sensor input. ASRock's
+manual describes it as the system-TR temperature source, but the input is
+handled by the host-side Super I/O/firmware path rather than an identified
+BMC I2C device. The current BMC image therefore does not expose it as a
+temperature sensor yet.
+
+## Safety state
+
+The first implementation inherits the known X570D4U wiring and overrides only
+facts confirmed on the TRX40 board. Cooling remains open-loop. No PID fan
+controller is installed. The firmware must start all three populated cooling
+headers at full PWM duty:
+
+- FAN1: top radiator fan group; tach 1 is populated
+- FAN2: water pump; no tach is reported by the vendor firmware
+- FAN3: bottom radiator fan group; tach 1 is populated
+
+Do not flash this build until the stock 64 MiB flash has been read twice with
+an external programmer, both reads match, UART is connected, and a recovery
+write has been rehearsed.
+
+## Build
+
+```sh
+. setup trx40d8-2n2t build/trx40d8-2n2t
+bitbake obmc-phosphor-image
+```
+
+## Bring-up order
+
+1. Validate the image and FIT contents off-target.
+2. Boot from a reversible/external SPI setup if the board permits it.
+3. Confirm UART, DRAM, flash partitions, MAC addresses, and both interfaces.
+4. Confirm all cooling outputs are at 100% before powering the host.
+5. Confirm power-good and button GPIO polarity using read-only observations.
+6. Test host power/reset, KCS, SOL/POST, USB virtual media, and video/KVM.
+7. Add closed-loop fan control only after pump behavior and every thermal
+   sensor have been verified.
+
+Unknown or unverified devices are documented in `docs/bringup.md`.
