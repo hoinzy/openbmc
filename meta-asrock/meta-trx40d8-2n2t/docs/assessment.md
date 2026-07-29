@@ -96,7 +96,7 @@ host-on test, so the upstream X570D4U pinctrl description remains unchanged.
 | Power/reset/state GPIO | powered-host pass validated GPIO ownership and power/reset/POST transitions; repeat on a clean boot and upstream the evidence | 1-2 days |
 | KCS, POST snoop, SOL | definitions exist; exercise full host lifecycle | 1-3 days |
 | Voltage sensors | channel map and thresholds implemented | 1-2 days target calibration |
-| Temperature sensors | TR1 is a documented host-side thermal header, but its BMC/vendor-IPMI path and other sensor addresses remain unidentified | 4-10 days |
+| Temperature sensors | TR1 is confirmed usable by the original BMC for fan curves, but its BMC transport/driver path and other sensor addresses remain unidentified | 4-10 days |
 | Pump/fan control | full-duty baseline safe; characterize outputs before PID | 3-7 days |
 | KVM/video | AST path exists; requires BIOS VGA switch and testing | 3-7 days |
 | KVM/USB stability | first S0 KVM use correlated with BMC RAM-boot reset/fallback and host USB `-71`; UART reproduction required | 2-5 days |

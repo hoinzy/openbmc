@@ -20,10 +20,10 @@ on I2C1; X570D4U places it on I2C7 and instead declares a temperature sensor
 on I2C1.
 
 The motherboard's `TR1` header is a 3-pin thermal-sensor input. ASRock's
-manual describes it as the system-TR temperature source, but the input is
-handled by the host-side Super I/O/firmware path rather than an identified
-BMC I2C device. The current BMC image therefore does not expose it as a
-temperature sensor yet.
+manual describes it as the system-TR temperature source, and the original
+BMC firmware can use it for fan curves. The current OpenBMC image does not
+expose it as a temperature sensor yet: the transport and driver path used by
+the original BMC still need to be identified.
 
 ## Safety state
 

@@ -261,10 +261,10 @@ The ASRock manual documents `TR1` as a 3-pin thermal-sensor header and lists
 system-TR temperature sensing in the motherboard hardware monitor. The live
 BMC image does not expose a TR1-specific hwmon channel, and the read-only S0
 I2C scans found no identified temperature device or `0x4c` device matching the
-inherited X570D4U temperature node. The current evidence therefore places TR1
-on the host Super-I/O/firmware or vendor-IPMI path, not in the BMC DTS. A
-future mapping needs host-side or vendor-IPMI correlation before adding a
-driver or Entity Manager sensor.
+inherited X570D4U temperature node. The original BMC nevertheless consumed
+TR1 for fan-curve control. This makes TR1 a confirmed OpenBMC transport/driver
+integration gap; its original Super-I/O, host-IPMI, or other management path
+must be traced before adding a driver or Entity Manager sensor.
 
 The BMC kernel has no `/sys/bus/pci/devices` hierarchy. Redfish consequently
 returns an empty `PCIeDevices` collection and zero processor and memory

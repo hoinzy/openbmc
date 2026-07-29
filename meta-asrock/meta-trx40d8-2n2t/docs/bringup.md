@@ -91,8 +91,10 @@ devices are declared yet for I2C3.
   system-TR temperature sensing in the hardware monitor. The live BMC image
   has no TR1 hwmon channel, no identified temperature child on the scanned BMC
   buses, and no `0x4c` device matching the inherited X570D4U temperature node.
-  Treat TR1 as a host/Super-I/O or vendor-IPMI inventory path until that path
-  is traced; do not add a guessed BMC DTS node.
+  The original BMC is confirmed to consume TR1 for fan-curve control, so this
+  is an OpenBMC transport/driver integration gap rather than proof that TR1 is
+  host-only. Trace the original BMC's Super-I/O, host-IPMI, or other management
+  path before adding a DTS node or sensor driver.
 - Whether CPU temperature uses SB-TSI, PECI compatibility logic, or an
   external monitor.
 - The exact `BMC_READY`, PROCHOT, THERMTRIP, chassis-intrusion, POST-complete,
