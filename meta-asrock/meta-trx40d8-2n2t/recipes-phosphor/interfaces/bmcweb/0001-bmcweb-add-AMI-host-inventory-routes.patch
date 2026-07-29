@@ -1,0 +1,96 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: OpenBMC Builder <openbmc-builder@users.noreply.github.com>
+Date: Thu, 30 Jul 2026 00:00:00 +0200
+Subject: [PATCH] bmcweb: add AMI host inventory routes
+
+The TRX40 AMI firmware uploads inventory through a USB Redfish host
+interface. Register the compatibility routes, advertise the OEM resource,
+and allow the source-bound handlers to perform their own authentication.
+
+The firmware's fallback credential is deliberately not a PAM account.
+
+Upstream-Status: Pending [board firmware compatibility]
+---
+ include/authentication.hpp             |  7 +++++++
+ redfish-core/lib/redfish_sessions.hpp  |  5 +++++
+ redfish-core/lib/service_root.hpp       |  2 ++
+ redfish-core/src/redfish.cpp            |  2 ++
+ 4 files changed, 16 insertions(+)
+
+diff --git a/include/authentication.hpp b/include/authentication.hpp
+index 6a14df9..5e855e9 100644
+--- a/include/authentication.hpp
++++ b/include/authentication.hpp
+@@ -222,6 +222,13 @@ inline bool isOnAllowlist(std::string_view url, boost::beast::http::verb method)
+     {
+         url.remove_suffix(1);
+     }
++    if ((url == "/redfish/v1/Oem/Ami/InventoryData") ||
++        (url == "/redfish/v1/oem/ami/inventory/crc"))
++    {
++        // These board-firmware compatibility routes perform their own source
++        // and credential checks after the request reaches the route handler.
++        return true;
++    }
+     if (boost::beast::http::verb::get == method)
+     {
+         if ((url == "/redfish") ||          //
+diff --git a/redfish-core/lib/redfish_sessions.hpp b/redfish-core/lib/redfish_sessions.hpp
+index 8752593..2b09586 100644
+--- a/redfish-core/lib/redfish_sessions.hpp
++++ b/redfish-core/lib/redfish_sessions.hpp
+@@ -4,6 +4,7 @@
+ #pragma once
+
+ #include "account_service.hpp"
++#include "ami_host_inventory.hpp"
+ #include "app.hpp"
+ #include "async_resp.hpp"
+ #include "cookies.hpp"
+@@ -225,6 +226,10 @@ inline void handleSessionCollectionPost(
+     crow::App& app, const crow::Request& req,
+     const std::shared_ptr<bmcweb::AsyncResp>& asyncResp)
+ {
++    if (handleAmiHostSessionPost(req, asyncResp))
++    {
++        return;
++    }
+     if (!redfish::setUpRedfishRoute(app, req, asyncResp))
+     {
+         return;
+diff --git a/redfish-core/lib/service_root.hpp b/redfish-core/lib/service_root.hpp
+index 8ec7d87..3f4db12 100644
+--- a/redfish-core/lib/service_root.hpp
++++ b/redfish-core/lib/service_root.hpp
+@@ -90,6 +90,8 @@ inline void handleServiceRootGetImpl(
+         "/redfish/v1/UpdateService";
+     asyncResp->res.jsonValue["UUID"] = uuid;
+     asyncResp->res.jsonValue["CertificateService"]["@odata.id"] =
+         "/redfish/v1/CertificateService";
++    asyncResp->res.jsonValue["Oem"]["Ami"]["InventoryData"]["@odata.id"] =
++        "/redfish/v1/Oem/Ami/InventoryData";
+     asyncResp->res.jsonValue["Tasks"]["@odata.id"] = "/redfish/v1/TaskService";
+     asyncResp->res.jsonValue["EventService"]["@odata.id"] =
+         "/redfish/v1/EventService";
+diff --git a/redfish-core/src/redfish.cpp b/redfish-core/src/redfish.cpp
+index e86b793..1e72582 100644
+--- a/redfish-core/src/redfish.cpp
++++ b/redfish-core/src/redfish.cpp
+@@ -5,6 +5,7 @@
+ #include "bmcweb_config.h"
+
+ #include "account_service.hpp"
+ #include "aggregation_service.hpp"
++#include "ami_host_inventory.hpp"
+ #include "app.hpp"
+ #include "assembly.hpp"
+@@ -174,6 +175,7 @@ RedfishService::RedfishService(App& app)
+
+     requestRoutesBiosService(app);
+     requestRoutesBiosReset(app);
++    requestRoutesAmiHostInventory(app);
+
+     if constexpr (BMCWEB_VM_NBDPROXY)
+     {
+--
+2.50.1

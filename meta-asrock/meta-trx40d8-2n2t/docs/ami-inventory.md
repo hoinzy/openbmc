@@ -1,29 +1,84 @@
 # AMI firmware inventory
 
-The board BIOS contains AMI `SystemInventoryInfo` and `RfInventory` modules.
-Its original BMC accepts the resulting inventory on the host KCS interface as
-AMI OEM netfn `0x32`, command `0x5a`.  This layer implements a clean-room,
-BMC-side receiver for the complete selector-zero message:
+The board BIOS contains AMI `RfInventory` and `RedfishHi` modules. Clean-room
+analysis of BIOS `TRX4D2T1.19F` shows that `RfInventory` generates Redfish-shaped
+JSON and uploads it to the BMC through an RNDIS USB host interface. This is not
+the AMI OEM KCS command previously assumed by this port.
 
 ```text
-AMI BIOS inventory producer -> KCS -> ami-inventory-ipmi
-                                      -> D-Bus inventory -> Redfish/WebUI
+AMI RfInventory
+  -> RNDIS USB (host 169.254.0.18, BMC 169.254.0.17)
+  -> HTTPS /redfish/v1/Oem/Ami/InventoryData
+  -> ami-host-inventory
+  -> standard OpenBMC inventory D-Bus objects
+  -> bmcweb CPU, Memory, and PCIe resources
 ```
 
-The receiver accepts only the system interface, validates every record before
-changing D-Bus, and persists the last valid packet in BMC storage.  It exposes
-standard `Inventory.Item.Cpu`, `Inventory.Item.Dimm`, and
-`Inventory.Item.PCIeDevice` interfaces, which bmcweb discovers through the
-object mapper.  No Ubuntu service, SMBIOS upload tool, or host OS dependency is
-part of this design.
+No host OS agent, Ubuntu service, SMBIOS conversion, or host filesystem is
+required. The BIOS is the data producer, just as it was with the original BMC.
 
-The AMI message has a 64-byte header.  Its record count is byte `0x3d`; each
-record is a nine-byte header, a bounded location path, and a bounded payload.
-The verified record types are CPU (`0x01`), DIMM (`0x08`), and PCI (`0x20`).
-The implementation intentionally does not emulate auxiliary vendor selectors
-or the original BMC's INI storage format.
+## Firmware protocol
 
-Static firmware analysis proves the BIOS-side inventory modules and the
-original BMC command/parser.  A future controlled host reboot with the new
-image must still capture and confirm the exact runtime request before this is
-claimed as hardware-validated.
+The implemented transaction follows the firmware:
+
+1. Probe `/redfish/v1/` and `/redfish/v1/Oem/Ami/InventoryData`.
+2. Read and update `/redfish/v1/oem/ami/inventory/crc`.
+3. POST `multipart/form-data` to the inventory endpoint. The part is named
+   `static_file`, its filename is `inventory.json`, and its body is JSON.
+4. PATCH the inventory endpoint with `{"BootComplete":true}`.
+
+CRC groups include `CPU`, `DIMM`, and `PCIE`. A firmware upload may omit an
+unchanged group. The receiver therefore stages each present category, retains
+the last committed value for omitted categories, and publishes only after
+`BootComplete`. A present but empty category intentionally clears that category.
+The complete committed snapshot and CRC state are persisted under
+`/var/lib/ami-host-inventory`.
+
+The CRC endpoint uses the firmware's exact array-of-singletons representation:
+`{"GroupCrcList":[{"DIMM":value},{"CPU":value},{"PCIE":value}]}`.
+
+The parser accepts the CPU, DIMM, and PCIe field names emitted by `RfInventory`,
+applies a 2 MiB request limit, bounds object counts and strings, and rejects
+malformed entries before changing D-Bus. It publishes
+`xyz.openbmc_project.Inventory.Item.Cpu`,
+`xyz.openbmc_project.Inventory.Item.Dimm`, and
+`xyz.openbmc_project.Inventory.Item.PCIeDevice` interfaces for bmcweb.
+
+## USB and authentication boundary
+
+`ami-host-interface` creates an RNDIS gadget on
+`1e6a0000.usb-vhub:p2`. Port `p1` remains available for the virtual-media
+gadget observed during bring-up. The BMC address is the vendor-compatible
+`169.254.0.17/16`; the firmware uses `169.254.0.18`.
+
+AMI RedfishHi supports no authentication, Basic authentication, or a Redfish
+session depending on BIOS setup. The compatibility routes support all three,
+but only when the TCP peer is `169.254.0.18`. The firmware fallback
+`HostAutoFW` credential is handled inside those source-restricted routes. It is
+deliberately not installed as a PAM, web, or SSH account and cannot be reused
+from a management LAN interface.
+
+## Validation boundary
+
+The endpoint paths, multipart names, category behavior, USB addresses, RNDIS
+transport, and firmware authentication modes are established from the vendor
+firmware. Parser unit tests cover full, sparse, empty, malformed, oversized,
+and round-trip updates. Hardware validation still requires booting a generated
+image and observing one BIOS upload, its D-Bus objects, and the resulting
+Redfish/WebUI CPU, DIMM, and PCIe resources.
+
+## BIOS configuration lead: GPIO 219
+
+The vendor BMC's `libipmipdkcmds.so.6.1.0` contains a separate SMI mailbox
+behind OEM netfn `0x3a`, commands `0xc0` through `0xc5`. Command `0xc2`
+(SetSMIUser) stages a BMC request and pulses GPIO 219. BIOS/SMM retrieves that
+request through `0xc5` (GetSMIBIOS), returns its response through `0xc4`
+(SetSMIBIOS), and the BMC-side client reads it with `0xc3` (GetSMIUser);
+`0xc0` and `0xc1` expose mailbox status. This is a strong lead for future BIOS
+configuration support and is independent of the RfInventory upload implemented
+here.
+
+GPIO 219 has not been electrically or runtime validated under OpenBMC. Future
+work should first correlate its line name, polarity, ownership, and SMI timing
+with passive captures. Do not toggle it or fuzz the mailbox on a running host
+until that evidence exists.

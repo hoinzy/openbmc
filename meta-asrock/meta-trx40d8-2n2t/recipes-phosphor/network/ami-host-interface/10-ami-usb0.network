@@ -1,0 +1,13 @@
+[Match]
+Name=usb0
+
+[Link]
+RequiredForOnline=no
+
+[Network]
+Address=169.254.0.17/16
+DHCP=no
+DNSDefaultRoute=no
+IPv6AcceptRA=no
+LinkLocalAddressing=no
+ConfigureWithoutCarrier=yes

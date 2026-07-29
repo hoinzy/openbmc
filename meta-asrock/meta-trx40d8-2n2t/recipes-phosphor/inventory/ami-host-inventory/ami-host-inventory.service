@@ -1,0 +1,12 @@
+[Unit]
+Description=AMI host firmware inventory
+After=dbus.service
+
+[Service]
+ExecStart=/usr/bin/ami-host-inventory
+Restart=on-failure
+StateDirectory=ami-host-inventory
+StateDirectoryMode=0750
+
+[Install]
+WantedBy=multi-user.target

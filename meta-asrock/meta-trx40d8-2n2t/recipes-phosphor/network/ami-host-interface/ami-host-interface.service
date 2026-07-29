@@ -1,0 +1,15 @@
+[Unit]
+Description=AMI Redfish USB host interface
+Wants=ami-host-inventory.service bmcweb.socket
+After=sys-kernel-config.mount ami-host-inventory.service bmcweb.socket
+Before=network.target
+ConditionPathIsDirectory=/sys/kernel/config/usb_gadget
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/ami-host-interface start
+ExecStop=/usr/libexec/ami-host-interface stop
+
+[Install]
+WantedBy=multi-user.target

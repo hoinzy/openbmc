@@ -27,5 +27,6 @@ RDEPENDS:${PN}-system = " \
         phosphor-power-regulators \
         biosconfig-manager \
         phosphor-ipmi-blobs \
-        ami-inventory-ipmi \
+        ami-host-interface \
+        ami-host-inventory \
         "
