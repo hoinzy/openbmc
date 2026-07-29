@@ -137,7 +137,7 @@ class InventoryPublisher
                        "ERROR", error);
             return;
         }
-        publish(ipmi::getSdBus(), inventory);
+        publish(getSdBus(), inventory);
         lg2::info("Restored AMI host inventory from BMC persistent storage");
     }
 
@@ -352,7 +352,7 @@ void registerAmiInventoryFunctions()
     ipmi::registerHandler(ipmi::prioOemBase, ipmi::netFnOemTwo,
                           amiInventoryCommand, ipmi::Privilege::Admin,
                           setAmiInventory);
-    ipmi::post_work([]() { publisher.restore(); });
+    post_work([]() { publisher.restore(); });
 }
 
 } // namespace
