@@ -18,7 +18,7 @@ Upstream-Status: Pending [board firmware compatibility]
  4 files changed, 16 insertions(+)
 
 diff --git a/include/authentication.hpp b/include/authentication.hpp
-index 6a14df9..5e855e9 100644
+index c71b5ec314..3371e42988 100644
 --- a/include/authentication.hpp
 +++ b/include/authentication.hpp
 @@ -222,6 +222,13 @@ inline bool isOnAllowlist(std::string_view url, boost::beast::http::verb method)
@@ -36,7 +36,7 @@ index 6a14df9..5e855e9 100644
      {
          if ((url == "/redfish") ||          //
 diff --git a/redfish-core/lib/redfish_sessions.hpp b/redfish-core/lib/redfish_sessions.hpp
-index 8752593..2b09586 100644
+index 504e5325b6..7751ca67a5 100644
 --- a/redfish-core/lib/redfish_sessions.hpp
 +++ b/redfish-core/lib/redfish_sessions.hpp
 @@ -4,6 +4,7 @@
@@ -47,7 +47,7 @@ index 8752593..2b09586 100644
  #include "app.hpp"
  #include "async_resp.hpp"
  #include "cookies.hpp"
-@@ -225,6 +226,10 @@ inline void handleSessionCollectionPost(
+@@ -231,6 +232,10 @@ inline void handleSessionCollectionPost(
      crow::App& app, const crow::Request& req,
      const std::shared_ptr<bmcweb::AsyncResp>& asyncResp)
  {
@@ -59,11 +59,10 @@ index 8752593..2b09586 100644
      {
          return;
 diff --git a/redfish-core/lib/service_root.hpp b/redfish-core/lib/service_root.hpp
-index 8ec7d87..3f4db12 100644
+index 61932151fa..6c63c27a61 100644
 --- a/redfish-core/lib/service_root.hpp
 +++ b/redfish-core/lib/service_root.hpp
-@@ -90,6 +90,8 @@ inline void handleServiceRootGetImpl(
-         "/redfish/v1/UpdateService";
+@@ -77,6 +77,8 @@ inline void handleServiceRootGetImpl(
      asyncResp->res.jsonValue["UUID"] = uuid;
      asyncResp->res.jsonValue["CertificateService"]["@odata.id"] =
          "/redfish/v1/CertificateService";
@@ -73,18 +72,18 @@ index 8ec7d87..3f4db12 100644
      asyncResp->res.jsonValue["EventService"]["@odata.id"] =
          "/redfish/v1/EventService";
 diff --git a/redfish-core/src/redfish.cpp b/redfish-core/src/redfish.cpp
-index e86b793..1e72582 100644
+index 0c2dc4d142..b9d8f66623 100644
 --- a/redfish-core/src/redfish.cpp
 +++ b/redfish-core/src/redfish.cpp
-@@ -5,6 +5,7 @@
- #include "bmcweb_config.h"
+@@ -6,6 +6,7 @@
 
  #include "account_service.hpp"
  #include "aggregation_service.hpp"
 +#include "ami_host_inventory.hpp"
  #include "app.hpp"
  #include "assembly.hpp"
-@@ -174,6 +175,7 @@ RedfishService::RedfishService(App& app)
+ #include "bios.hpp"
+@@ -196,6 +197,7 @@ RedfishService::RedfishService(App& app)
 
      requestRoutesBiosService(app);
      requestRoutesBiosReset(app);
