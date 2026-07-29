@@ -22,13 +22,13 @@ index 5fba2cd..5bf26c9 100644
 --- a/nbd-proxy.c
 +++ b/nbd-proxy.c
 @@ -157,7 +157,7 @@ static int start_nbd_client(struct ctx* ctx)
-         dup2(fd, STDIN_FILENO);
          dup2(fd, STDOUT_FILENO);
          close(fd);
-
+ 
 -        execlp("nbd-client", "nbd-client", "-u", ctx->sock_path, "-n", "-L",
 +        execlp("nbd-client", "nbd-client", "-u", ctx->sock_path, "-n",
                 "-t", timeout_str, ctx->config->nbd_device, NULL);
          err(EXIT_FAILURE, "can't start ndb client");
+     }
 -- 
 2.50.1
