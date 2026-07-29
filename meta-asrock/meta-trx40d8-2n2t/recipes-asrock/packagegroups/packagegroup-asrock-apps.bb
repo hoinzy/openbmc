@@ -26,4 +26,6 @@ RDEPENDS:${PN}-system = " \
         phosphor-post-code-manager \
         phosphor-power-regulators \
         biosconfig-manager \
+        phosphor-ipmi-blobs \
+        smbios-mdr \
         "

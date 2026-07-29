@@ -26,6 +26,11 @@ NCT6796 profile exposed `TSI0_TEMP` and `TSI1_TEMP` through hwmon, proving the
 transport and driver path. Which TSI channel is wired to TR1 still needs a
 controlled hardware correlation, so neither channel is named `TR1` yet.
 
+The host's CPU and DIMM data is published through the standard OpenBMC SMBIOS
+blob receiver over the already verified KCS interface. See
+[`docs/smbios-inventory.md`](docs/smbios-inventory.md) for the validated
+Threadripper/DIMM inventory and the intentionally opt-in host uploader.
+
 ## Safety state
 
 The first implementation inherits the known X570D4U wiring and overrides only

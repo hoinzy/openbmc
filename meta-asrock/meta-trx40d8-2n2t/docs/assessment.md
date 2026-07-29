@@ -8,7 +8,7 @@
 | Host CPU | AMD Ryzen Threadripper 3970X |
 | Host memory | 128 GiB |
 | Host OS | Ubuntu 24.04 |
-| BIOS | L1.19D |
+| BIOS | L1.19F |
 | BMC | AST2500, vendor firmware 1.30 |
 | BMC IPMI ID | manufacturer 49622, product `0x0202` |
 | Host KCS | channel 3 at `0xca2` |
