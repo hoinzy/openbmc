@@ -27,5 +27,5 @@ RDEPENDS:${PN}-system = " \
         phosphor-power-regulators \
         biosconfig-manager \
         phosphor-ipmi-blobs \
-        smbios-mdr \
+        ami-inventory-ipmi \
         "
