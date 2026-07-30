@@ -43,6 +43,6 @@ EXTRA_OEMESON = " \
 SYSTEMD_SERVICE:${PN} = "xyz.openbmc_project.VirtualMedia.service"
 
 do_install:append() {
-    install -m 0644 ${WORKDIR}/virtual-media.json \
+    install -m 0644 ${UNPACKDIR}/virtual-media.json \
         ${D}${sysconfdir}/virtual-media.json
 }
