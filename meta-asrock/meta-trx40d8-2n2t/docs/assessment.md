@@ -16,9 +16,10 @@
 | BMC RAM | 512 MiB, ECC enabled |
 
 The host exposes the AST1150 PCI bridge and the AMI virtual USB hub, CD-ROM,
-Ethernet, and HID functions. The current host graphics path is the discrete
-NVIDIA GPU; KVM capture must be tested with BIOS `Onboard VGA` selected as the
-primary display.
+Ethernet, and HID functions. BIOS `Onboard VGA` has now been selected as the
+primary display and the physical monitor disconnected. `obmc-ikvm` negotiates
+a 1024x768 mode, but both its VNC framebuffer and the WebUI capture remain
+black after host boot.
 
 ## Upstream starting point
 
@@ -82,8 +83,11 @@ incomplete.
 The first RAM boot exposed one inherited X570D4U device-tree bug: the reserved
 graphics framebuffer was not linked to the GFX controller. The local board
 override now adds the binding-required `memory-region`; a rebuilt RAM boot is
-now confirmed to initialize DRM and the AST framebuffer. KVM capture still
-needs an end-to-end BIOS-primary-display test.
+now confirmed to initialize DRM and the AST framebuffer. An end-to-end
+BIOS-primary-display test reaches a valid 1024x768 capture mode but still
+returns a black frame. Kernel video timings renegotiate correctly, so the
+remaining issue is host display routing or framebuffer content rather than
+WebUI screenshot generation.
 
 It also showed that the inherited NCSI pinctrl transaction fails: live debugfs
 shows neither RMII2 nor MDIO2 applied, including with an RMII2-only test DTB.
@@ -101,7 +105,7 @@ host-on test, so the upstream X570D4U pinctrl description remains unchanged.
 | Voltage sensors | channel map and thresholds implemented | 1-2 days target calibration |
 | Temperature sensors | NCT6796D I2C path is identified and its two TSI channels are exposed by a transient probe; TR1 channel correlation and remaining sensors are still open | 2-6 days |
 | Pump/fan control | full-duty baseline safe; characterize outputs before PID | 3-7 days |
-| KVM/video | AST path exists; requires BIOS VGA switch and testing | 3-7 days |
+| KVM/video | AST path negotiates 1024x768 with onboard VGA primary, but captures remain black | 2-5 days |
 | KVM/USB stability | first S0 KVM use correlated with BMC RAM-boot reset/fallback and host USB `-71`; UART reproduction required | 2-5 days |
 | Virtual media | WebSocket/NBD negotiation and AST mass-storage gadget pass in RAM after the board-layer jsnbd fix; host enumeration and sustained reads remain | 1-2 days |
 | Redfish thermal/power surface | host/chassis `PowerState: On` now works; fan and PSU collections are empty, ThermalMetrics returns HTTP 500, and host CPU/DIMM/PCI inventory is absent | 2-4 days |

@@ -92,13 +92,42 @@ and round-trip updates. A live Linux test on the isolated USB interface reached
 `169.254.0.17`, completed an HTTPS request to bmcweb, and incremented the BMC's
 `usb0` counters. A transient run of the identity-corrected gadget enumerated
 on Linux as `046b:ffb0 American Megatrends, Inc. Virtual Ethernet`, bound to
-`rndis_host`, and repeated the successful ping and HTTPS checks. The previously
-installed descriptor set did not receive any UEFI traffic during a full host
-boot. The installed corrected image also produced no UEFI Ethernet frames
-during a packet capture spanning a complete warm reboot. Hardware validation
-of the inventory publication now specifically requires an image containing
-the CDC Ethernet descriptor patch, followed by one BIOS upload, its D-Bus
-objects, and the resulting Redfish/WebUI CPU, DIMM, and PCIe resources.
+`rndis_host`, and repeated the successful ping and HTTPS checks.
+
+The first identity-corrected image still omitted the CDC Ethernet functional
+descriptor, so AMI UEFI did not install its network interface and emitted no
+frames. With that descriptor added, a later full reboot produced pre-OS RNDIS
+traffic and isolated a second compatibility issue. Dynamic kernel tracing
+recorded:
+
+```text
+RESET
+INIT
+HALT
+INIT
+HALT
+RESET
+INIT
+HALT
+INIT
+```
+
+AMI never sends `OID_GEN_CURRENT_PACKET_FILTER` after the final `INIT`. Its
+Ethernet frames nevertheless arrive at the BMC: the firmware MAC
+`02:1a:11:00:00:18` repeatedly asks by ARP for `169.254.0.17` from
+`169.254.0.18`, followed by IPv6 router and neighbor discovery. Linux RNDIS
+turns carrier off on `HALT` and normally restores it only after a nonzero
+packet-filter request, so every BMC reply is dropped after the final `INIT`.
+The 7,014-byte capture has SHA-256
+`b994aa3af72291739ab03629b122c9f8cd206849c4246ff48dc091566fc3ba56`.
+
+The board kernel therefore adds an opt-in ConfigFS
+`initial_packet_filter`. It is zero by default and does not change conforming
+RNDIS functions. `ami-host-interface` sets it to `0x000d` (directed,
+all-multicast, and broadcast), causing each `INIT` to restore carrier and the
+data-initialized state. Hardware validation still requires installing the
+image with this final quirk, capturing one BIOS upload, and confirming the
+resulting D-Bus and Redfish/WebUI CPU, DIMM, and PCIe resources.
 
 ## BIOS configuration lead: GPIO 219
 

@@ -381,3 +381,43 @@ sets its maximum segment size to 1514. The board kernel patch now makes
 `f_rndis` publish the equivalent descriptor. This explains the complete lack
 of pre-OS Ethernet frames: the UEFI network interface was never installed, so
 `RedfishHi` could not reach its later media-state check.
+
+## AMI UEFI RNDIS packet-filter trace
+
+After installing the image containing the CDC Ethernet descriptor, a second
+warm-reboot capture proved that AMI UEFI now installs and uses its RNDIS
+interface. Dynamic debug in `f_rndis.c`, `rndis.c`, and `u_ether.c` recorded
+the following control-message sequence:
+
+```text
+RESET -> INIT -> HALT -> INIT -> HALT -> RESET -> INIT -> HALT -> INIT
+```
+
+There is no `OID_GEN_CURRENT_PACKET_FILTER` request after the final `INIT`.
+The last preceding `HALT` calls `netif_carrier_off()` and stops the transmit
+queue; standard Linux RNDIS does not reverse those operations on `INIT`.
+
+The simultaneous packet capture contains repeated frames from AMI MAC
+`02:1a:11:00:00:18`, including:
+
+```text
+ARP, Request who-has 169.254.0.17 tell 169.254.0.18
+IPv6 router solicitation
+IPv6 neighbor solicitation
+```
+
+Receive counters advance on BMC `usb0`, but carrier remains zero and each
+attempted BMC response increments `tx_dropped`. No ARP reply reaches UEFI, so
+its HTTP inventory client cannot start. The capture is 7,014 bytes with
+SHA-256
+`b994aa3af72291739ab03629b122c9f8cd206849c4246ff48dc091566fc3ba56`.
+
+Static analysis independently agrees with the trace: the AMI UEFI RNDIS module
+constructs INIT, HALT, RESET, QUERY, and KEEPALIVE control messages, but no SET
+message (`MessageType == 5`) for `OID_GEN_CURRENT_PACKET_FILTER`.
+
+The compatibility patch adds a per-function ConfigFS
+`initial_packet_filter`, disabled by default. The TRX40D8 gadget selects
+`0x000d`, which restores directed, all-multicast, and broadcast reception plus
+carrier on every `INIT`. This is intentionally board-scoped; standard RNDIS
+behavior is unchanged for every function that leaves the attribute at zero.
