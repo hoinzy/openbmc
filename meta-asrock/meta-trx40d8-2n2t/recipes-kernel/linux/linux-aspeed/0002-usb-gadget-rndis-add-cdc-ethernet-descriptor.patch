@@ -1,0 +1,126 @@
+From 52ca650953db266572025179ab66b6f94f07b8ea Mon Sep 17 00:00:00 2001
+From: Till Heinzerling <1684934+hoinzy@users.noreply.github.com>
+Date: Thu, 30 Jul 2026 18:30:00 +0200
+Subject: [PATCH] usb: gadget: rndis: add CDC Ethernet descriptor
+
+Some UEFI RNDIS drivers use the CDC Ethernet functional descriptor to
+discover the host MAC address and maximum frame size before exposing their
+network interface. Linux's RNDIS gadget currently provides the ACM veneer
+and union descriptors but omits the Ethernet descriptor, so those drivers
+match the CDC data interface and then fail to start.
+
+Publish the same host MAC used by the RNDIS protocol through an Ethernet
+functional descriptor. This is also how the board's original AMI gadget
+describes both its RNDIS and CDC configurations.
+
+Upstream-Status: Pending
+Signed-off-by: Till Heinzerling <1684934+hoinzy@users.noreply.github.com>
+---
+ drivers/usb/gadget/function/f_rndis.c | 29 +++++++++++++++++++++++++++++
+ 1 file changed, 29 insertions(+)
+
+diff --git a/drivers/usb/gadget/function/f_rndis.c b/drivers/usb/gadget/function/f_rndis.c
+index 1f2c06f8ca0b..d22ad21d5d86 100644
+--- a/drivers/usb/gadget/function/f_rndis.c
++++ b/drivers/usb/gadget/function/f_rndis.c
+@@ -73,6 +73,7 @@ struct f_rndis {
+ 	struct gether			port;
+ 	u8				ctrl_id, data_id;
+ 	u8				ethaddr[ETH_ALEN];
++	char				ethaddr_string[14];
+ 	u32				vendorID;
+ 	const char			*manufacturer;
+ 	struct rndis_params		*params;
+@@ -144,6 +145,18 @@ static struct usb_cdc_union_desc rndis_union_desc = {
+ 	/* .bSlaveInterface0 =	DYNAMIC */
+ };
+ 
++static struct usb_cdc_ether_desc rndis_ether_desc = {
++	.bLength =		sizeof(rndis_ether_desc),
++	.bDescriptorType =	USB_DT_CS_INTERFACE,
++	.bDescriptorSubType =	USB_CDC_ETHERNET_TYPE,
++
++	/* .iMACAddress = DYNAMIC */
++	.bmEthernetStatistics =	cpu_to_le32(0),
++	.wMaxSegmentSize =	cpu_to_le16(ETH_FRAME_LEN),
++	.wNumberMCFilters =	cpu_to_le16(0),
++	.bNumberPowerFilters =	0,
++};
++
+ /* the data interface has two bulk endpoints */
+ 
+ static struct usb_interface_descriptor rndis_data_intf = {
+@@ -209,6 +222,7 @@ static struct usb_descriptor_header *eth_fs_function[] = {
+ 	(struct usb_descriptor_header *) &call_mgmt_descriptor,
+ 	(struct usb_descriptor_header *) &rndis_acm_descriptor,
+ 	(struct usb_descriptor_header *) &rndis_union_desc,
++	(struct usb_descriptor_header *) &rndis_ether_desc,
+ 	(struct usb_descriptor_header *) &fs_notify_desc,
+ 
+ 	/* data interface has no altsetting */
+@@ -257,6 +271,7 @@ static struct usb_descriptor_header *eth_hs_function[] = {
+ 	(struct usb_descriptor_header *) &call_mgmt_descriptor,
+ 	(struct usb_descriptor_header *) &rndis_acm_descriptor,
+ 	(struct usb_descriptor_header *) &rndis_union_desc,
++	(struct usb_descriptor_header *) &rndis_ether_desc,
+ 	(struct usb_descriptor_header *) &hs_notify_desc,
+ 
+ 	/* data interface has no altsetting */
+@@ -324,6 +339,7 @@ static struct usb_descriptor_header *eth_ss_function[] = {
+ 	(struct usb_descriptor_header *) &call_mgmt_descriptor,
+ 	(struct usb_descriptor_header *) &rndis_acm_descriptor,
+ 	(struct usb_descriptor_header *) &rndis_union_desc,
++	(struct usb_descriptor_header *) &rndis_ether_desc,
+ 	(struct usb_descriptor_header *) &ss_notify_desc,
+ 	(struct usb_descriptor_header *) &ss_intr_comp_desc,
+ 
+@@ -342,6 +358,7 @@ static struct usb_string rndis_string_defs[] = {
+ 	[0].s = "RNDIS Communications Control",
+ 	[1].s = "RNDIS Ethernet Data",
+ 	[2].s = "RNDIS",
++	[3].s = NULL, /* host MAC */
+ 	{  } /* end of list */
+ };
+ 
+@@ -698,6 +715,8 @@ rndis_bind(struct usb_configuration *c, struct usb_function *f)
+ 		}
+ 	}
+ 
++	rndis_string_defs[3].s = rndis->ethaddr_string;
++
+ 	us = usb_gstrings_attach(cdev, rndis_strings,
+ 				 ARRAY_SIZE(rndis_string_defs));
+ 	if (IS_ERR(us))
+@@ -705,6 +724,7 @@ rndis_bind(struct usb_configuration *c, struct usb_function *f)
+ 	rndis_control_intf.iInterface = us[0].id;
+ 	rndis_data_intf.iInterface = us[1].id;
+ 	rndis_iad_descriptor.iFunction = us[2].id;
++	rndis_ether_desc.iMACAddress = us[3].id;
+ 
+ 	/* allocate instance-specific interface IDs */
+ 	status = usb_interface_id(c, f);
+@@ -965,6 +985,7 @@ static struct usb_function *rndis_alloc(struct usb_function_instance *fi)
+ 	struct f_rndis	*rndis;
+ 	struct f_rndis_opts *opts;
+ 	struct rndis_params *params;
++	int status;
+ 
+ 	/* allocate and initialize one new instance */
+ 	rndis = kzalloc(sizeof(*rndis), GFP_KERNEL);
+@@ -976,6 +997,14 @@ static struct usb_function *rndis_alloc(struct usb_function_instance *fi)
+ 	opts->refcnt++;
+ 
+ 	gether_get_host_addr_u8(opts->net, rndis->ethaddr);
++	status = gether_get_host_addr_cdc(opts->net, rndis->ethaddr_string,
++					  sizeof(rndis->ethaddr_string));
++	if (status < 12) {
++		kfree(rndis);
++		mutex_unlock(&opts->lock);
++		return ERR_PTR(-EINVAL);
++	}
++
+ 	rndis->vendorID = opts->vendor_id;
+ 	rndis->manufacturer = opts->manufacturer;
+ 
+-- 
+2.50.1

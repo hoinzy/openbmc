@@ -335,8 +335,8 @@ enables `RfInventory`. The raw BIOS extension has MD5
 source-restricted native route, avoiding installation or execution of the
 vendor extension archive.
 
-The corrected ConfigFS script was also run transiently against the dedicated
-gadget while the host OS was online. Linux re-enumerated it as
+The identity-corrected ConfigFS script was also run transiently against the
+dedicated gadget while the host OS was online. Linux re-enumerated it as
 `046b:ffb0 American Megatrends, Inc. Virtual Ethernet`, reported device class
 `02/00/00`, and bound `rndis_host`. With a temporary `169.254.0.18/16` address,
 ping to `169.254.0.17` had no loss and HTTPS GETs of `/redfish/v1/` and the AMI
@@ -363,3 +363,21 @@ remaining failure boundary. The next investigation must establish why the
 UEFI driver is not opening the network device at all, including its
 `EFI_SIMPLE_NETWORK_PROTOCOL` media-state gate and any BIOS setup policy that
 controls Redfish Host Interface or inventory publication.
+
+Subsequent clean-room analysis of the extracted `UsbRndisDriverSrc` and
+`UsbLanDriverSrc` modules identified that activation failure. The RNDIS driver
+accepts the gadget's CDC data interface (`0a/00/00`), then publishes an
+intermediate protocol. The USB-LAN driver consumes that protocol but aborts
+unless class-specific descriptor subtype `0x0f` is present. It uses the CDC
+Ethernet descriptor's `iMACAddress` and `wMaxSegmentSize` fields before
+installing the UEFI network interface.
+
+Host `lsusb -v` confirmed that the standard Linux ConfigFS RNDIS function
+emits CDC header, call-management, ACM, and union descriptors, but no CDC
+Ethernet descriptor. In contrast, the original unstripped AMI `eth.ko`
+`CreateEthernetDescriptor` function explicitly formats the host MAC as
+`%02X%02X%02X%02X%02X%02X`, adds a 13-byte subtype-`0x0f` descriptor, and
+sets its maximum segment size to 1514. The board kernel patch now makes
+`f_rndis` publish the equivalent descriptor. This explains the complete lack
+of pre-OS Ethernet frames: the UEFI network interface was never installed, so
+`RedfishHi` could not reach its later media-state check.

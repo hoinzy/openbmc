@@ -23,9 +23,16 @@ required. The BIOS is the data producer, just as it was with the original BMC.
 `MediaPresentSupported` and `MediaPresent` before starting its Redfish client.
 The original BMC's `eth.ko` exposes USB identity `046b:ffb0`, device class
 `02/00/00`, manufacturer `American Megatrends Inc.`, product
-`Virtual Ethernet`, and serial `1234567890`. The ConfigFS gadget mirrors that
-identity so the board's AMI UEFI RNDIS driver can create the protocol before
-the host OS starts.
+`Virtual Ethernet`, and serial `1234567890`.
+
+The AMI `UsbRndisDriverSrc` accepts a CDC data interface with class tuple
+`0a/00/00`, but `UsbLanDriverSrc` then requires a CDC Ethernet functional
+descriptor (class-specific subtype `0x0f`). It reads `iMACAddress` and
+`wMaxSegmentSize` from that descriptor before installing the UEFI network
+interface. Linux's standard ConfigFS RNDIS function omits this descriptor.
+The original `eth.ko` emits it with the host MAC formatted as 12 hexadecimal
+characters and a maximum segment size of 1514 bytes. The board kernel patch
+adds the equivalent descriptor to `f_rndis`.
 
 `AmiRedfishDynExt` then checks the embedded inventory extension before enabling
 `RfInventory`. It requests
@@ -83,15 +90,15 @@ transport, and firmware authentication modes are established from the vendor
 firmware. Parser unit tests cover full, sparse, empty, malformed, oversized,
 and round-trip updates. A live Linux test on the isolated USB interface reached
 `169.254.0.17`, completed an HTTPS request to bmcweb, and incremented the BMC's
-`usb0` counters. A transient run of the corrected gadget enumerated on Linux as
-`046b:ffb0 American Megatrends, Inc. Virtual Ethernet`, bound to `rndis_host`,
-and repeated the successful ping and HTTPS checks. The previously installed
-descriptor set did not receive any UEFI traffic during a full host boot. The
-installed corrected image also produced no UEFI Ethernet frames during a
-packet capture spanning a complete warm reboot. Hardware validation of the
-inventory publication now specifically requires resolving that pre-OS driver
-activation gate and then observing one BIOS upload, its D-Bus objects, and the
-resulting Redfish/WebUI CPU, DIMM, and PCIe resources.
+`usb0` counters. A transient run of the identity-corrected gadget enumerated
+on Linux as `046b:ffb0 American Megatrends, Inc. Virtual Ethernet`, bound to
+`rndis_host`, and repeated the successful ping and HTTPS checks. The previously
+installed descriptor set did not receive any UEFI traffic during a full host
+boot. The installed corrected image also produced no UEFI Ethernet frames
+during a packet capture spanning a complete warm reboot. Hardware validation
+of the inventory publication now specifically requires an image containing
+the CDC Ethernet descriptor patch, followed by one BIOS upload, its D-Bus
+objects, and the resulting Redfish/WebUI CPU, DIMM, and PCIe resources.
 
 ## BIOS configuration lead: GPIO 219
 
