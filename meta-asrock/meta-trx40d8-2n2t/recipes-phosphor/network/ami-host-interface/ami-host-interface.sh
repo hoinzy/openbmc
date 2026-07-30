@@ -74,6 +74,11 @@ printf '%s' 02:1a:11:00:00:17 \
     > "${gadget_path}/functions/rndis.usb0/dev_addr"
 printf '%s' 02:1a:11:00:00:18 \
     > "${gadget_path}/functions/rndis.usb0/host_addr"
+# AMI UEFI sends RNDIS HALT followed by INIT, then starts transmitting without
+# OID_GEN_CURRENT_PACKET_FILTER. Restore directed, all-multicast, and broadcast
+# traffic on INIT so the BMC can answer its ARP request for 169.254.0.17.
+printf '%s' 0x000d \
+    > "${gadget_path}/functions/rndis.usb0/initial_packet_filter"
 printf '%s' RNDIS \
     > "${gadget_path}/functions/rndis.usb0/os_desc/interface.rndis/compatible_id"
 printf '%s' 5162001 \

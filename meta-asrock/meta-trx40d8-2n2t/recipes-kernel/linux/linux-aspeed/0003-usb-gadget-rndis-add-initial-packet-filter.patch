@@ -1,0 +1,241 @@
+From 94ccf6a7e0b205e43bc8a14e6c8d54fb239871b4 Mon Sep 17 00:00:00 2001
+From: Till Heinzerling <1684934+hoinzy@users.noreply.github.com>
+Date: Thu, 30 Jul 2026 17:53:21 +0200
+Subject: [PATCH] usb: gadget: rndis: add initial packet filter
+
+RNDIS normally keeps its data path disabled until the host sets
+OID_GEN_CURRENT_PACKET_FILTER. Some firmware RNDIS implementations
+initialize the device and use the bulk endpoints without sending that
+request. If the firmware probes the function with HALT followed by another
+INIT, the gadget remains without carrier and drops every response.
+
+Add an opt-in ConfigFS initial_packet_filter attribute. A nonzero value
+applies the configured filter on every RNDIS INIT and transitions the
+function to the data-initialized state. The default remains zero,
+preserving the existing RNDIS state machine for conforming hosts.
+
+Upstream-Status: Pending
+
+Signed-off-by: Till Heinzerling <1684934+hoinzy@users.noreply.github.com>
+---
+ drivers/usb/gadget/function/f_rndis.c | 48 ++++++++++++++++++++++++++-
+ drivers/usb/gadget/function/rndis.c   | 39 ++++++++++++++++------
+ drivers/usb/gadget/function/rndis.h   |  3 ++
+ drivers/usb/gadget/function/u_rndis.h |  3 ++
+ 4 files changed, 81 insertions(+), 12 deletions(-)
+
+diff --git a/drivers/usb/gadget/function/f_rndis.c b/drivers/usb/gadget/function/f_rndis.c
+index f1ead29..ef6f852 100644
+--- a/drivers/usb/gadget/function/f_rndis.c
++++ b/drivers/usb/gadget/function/f_rndis.c
+@@ -74,6 +74,7 @@ struct f_rndis {
+ 	u8				ctrl_id, data_id;
+ 	u8				ethaddr[ETH_ALEN];
+ 	char				ethaddr_string[14];
++	u16				initial_packet_filter;
+ 	u32				vendorID;
+ 	const char			*manufacturer;
+ 	struct rndis_params		*params;
+@@ -596,7 +597,7 @@ static int rndis_set_alt(struct usb_function *f, unsigned intf, unsigned alt)
+ 		 * very long time.  We need another call to the link layer
+ 		 * code -- gether_updown(...bool) maybe -- to do it right.
+ 		 */
+-		rndis->port.cdc_filter = 0;
++		rndis->port.cdc_filter = rndis->initial_packet_filter;
+ 
+ 		DBG(cdev, "RNDIS RX/TX early activation ... \n");
+ 		net = gether_connect(&rndis->port);
+@@ -872,6 +873,47 @@ USB_ETHER_CONFIGFS_ITEM_ATTR_U8_RW(rndis, subclass);
+ /* f_rndis_opts_protocol */
+ USB_ETHER_CONFIGFS_ITEM_ATTR_U8_RW(rndis, protocol);
+ 
++/* f_rndis_opts_initial_packet_filter */
++static ssize_t
++rndis_opts_initial_packet_filter_show(struct config_item *item, char *page)
++{
++	struct f_rndis_opts *opts = to_f_rndis_opts(item);
++	int ret;
++
++	mutex_lock(&opts->lock);
++	ret = sprintf(page, "0x%04x\n", opts->initial_packet_filter);
++	mutex_unlock(&opts->lock);
++
++	return ret;
++}
++
++static ssize_t
++rndis_opts_initial_packet_filter_store(struct config_item *item,
++				       const char *page, size_t len)
++{
++	struct f_rndis_opts *opts = to_f_rndis_opts(item);
++	u16 filter;
++	int ret;
++
++	mutex_lock(&opts->lock);
++	if (opts->refcnt) {
++		ret = -EBUSY;
++		goto out;
++	}
++
++	ret = kstrtou16(page, 0, &filter);
++	if (ret)
++		goto out;
++
++	opts->initial_packet_filter = filter;
++	ret = len;
++out:
++	mutex_unlock(&opts->lock);
++	return ret;
++}
++
++CONFIGFS_ATTR(rndis_opts_, initial_packet_filter);
++
+ static struct configfs_attribute *rndis_attrs[] = {
+ 	&rndis_opts_attr_dev_addr,
+ 	&rndis_opts_attr_host_addr,
+@@ -880,6 +922,7 @@ static struct configfs_attribute *rndis_attrs[] = {
+ 	&rndis_opts_attr_class,
+ 	&rndis_opts_attr_subclass,
+ 	&rndis_opts_attr_protocol,
++	&rndis_opts_attr_initial_packet_filter,
+ 	NULL,
+ };
+ 
+@@ -1007,6 +1050,7 @@ static struct usb_function *rndis_alloc(struct usb_function_instance *fi)
+ 
+ 	rndis->vendorID = opts->vendor_id;
+ 	rndis->manufacturer = opts->manufacturer;
++	rndis->initial_packet_filter = opts->initial_packet_filter;
+ 
+ 	rndis->port.ioport = netdev_priv(opts->net);
+ 	mutex_unlock(&opts->lock);
+@@ -1033,6 +1077,8 @@ static struct usb_function *rndis_alloc(struct usb_function_instance *fi)
+ 		return ERR_CAST(params);
+ 	}
+ 	rndis->params = params;
++	rndis_set_initial_packet_filter(params,
++					rndis->initial_packet_filter);
+ 
+ 	return &rndis->port.func;
+ }
+diff --git a/drivers/usb/gadget/function/rndis.c b/drivers/usb/gadget/function/rndis.c
+index 2a52de8..de0df6b 100644
+--- a/drivers/usb/gadget/function/rndis.c
++++ b/drivers/usb/gadget/function/rndis.c
+@@ -481,6 +481,22 @@ static int gen_ndis_query_resp(struct rndis_params *params, u32 OID, u8 *buf,
+ 	return retval;
+ }
+ 
++static void rndis_apply_packet_filter(struct rndis_params *params, u16 filter)
++{
++	*params->filter = filter;
++
++	if (filter) {
++		params->state = RNDIS_DATA_INITIALIZED;
++		netif_carrier_on(params->dev);
++		if (netif_running(params->dev))
++			netif_wake_queue(params->dev);
++	} else {
++		params->state = RNDIS_INITIALIZED;
++		netif_carrier_off(params->dev);
++		netif_stop_queue(params->dev);
++	}
++}
++
+ static int gen_ndis_set_resp(struct rndis_params *params, u32 OID,
+ 			     u8 *buf, u32 buf_len, rndis_resp_t *r)
+ {
+@@ -513,7 +529,8 @@ static int gen_ndis_set_resp(struct rndis_params *params, u32 OID,
+ 		 *	PROMISCUOUS, DIRECTED,
+ 		 *	MULTICAST, ALL_MULTICAST, BROADCAST
+ 		 */
+-		*params->filter = (u16)get_unaligned_le32(buf);
++		rndis_apply_packet_filter(params,
++					  (u16)get_unaligned_le32(buf));
+ 		pr_debug("%s: RNDIS_OID_GEN_CURRENT_PACKET_FILTER %08x\n",
+ 			__func__, *params->filter);
+ 
+@@ -522,16 +539,6 @@ static int gen_ndis_set_resp(struct rndis_params *params, u32 OID,
+ 		 * activating the CDC Ethernet altsetting.
+ 		 */
+ 		retval = 0;
+-		if (*params->filter) {
+-			params->state = RNDIS_DATA_INITIALIZED;
+-			netif_carrier_on(params->dev);
+-			if (netif_running(params->dev))
+-				netif_wake_queue(params->dev);
+-		} else {
+-			params->state = RNDIS_INITIALIZED;
+-			netif_carrier_off(params->dev);
+-			netif_stop_queue(params->dev);
+-		}
+ 		break;
+ 
+ 	case RNDIS_OID_802_3_MULTICAST_LIST:
+@@ -791,6 +798,12 @@ void rndis_set_host_mac(struct rndis_params *params, const u8 *addr)
+ }
+ EXPORT_SYMBOL_GPL(rndis_set_host_mac);
+ 
++void rndis_set_initial_packet_filter(struct rndis_params *params, u16 filter)
++{
++	params->initial_packet_filter = filter;
++}
++EXPORT_SYMBOL_GPL(rndis_set_initial_packet_filter);
++
+ /*
+  * Message Parser
+  */
+@@ -820,6 +833,10 @@ int rndis_msg_parser(struct rndis_params *params, u8 *buf)
+ 		pr_debug("%s: RNDIS_MSG_INIT\n",
+ 			__func__);
+ 		params->state = RNDIS_INITIALIZED;
++		if (params->initial_packet_filter && params->filter &&
++		    params->dev)
++			rndis_apply_packet_filter(params,
++						  params->initial_packet_filter);
+ 		return rndis_init_response(params, (rndis_init_msg_type *)buf);
+ 
+ 	case RNDIS_MSG_HALT:
+diff --git a/drivers/usb/gadget/function/rndis.h b/drivers/usb/gadget/function/rndis.h
+index 6206b8b..524a430 100644
+--- a/drivers/usb/gadget/function/rndis.h
++++ b/drivers/usb/gadget/function/rndis.h
+@@ -160,6 +160,7 @@ typedef struct rndis_params {
+ 	int			confignr;
+ 	u8			used;
+ 	u16			saved_filter;
++	u16			initial_packet_filter;
+ 	enum rndis_state	state;
+ 	u32			medium;
+ 	u32			speed;
+@@ -198,5 +199,7 @@ int  rndis_signal_connect(struct rndis_params *params);
+ int  rndis_signal_disconnect(struct rndis_params *params);
+ int  rndis_state(struct rndis_params *params);
+ extern void rndis_set_host_mac(struct rndis_params *params, const u8 *addr);
++void rndis_set_initial_packet_filter(struct rndis_params *params,
++				     u16 filter);
+ 
+ #endif  /* _LINUX_RNDIS_H */
+diff --git a/drivers/usb/gadget/function/u_rndis.h b/drivers/usb/gadget/function/u_rndis.h
+index 4e64619..7c9373f 100644
+--- a/drivers/usb/gadget/function/u_rndis.h
++++ b/drivers/usb/gadget/function/u_rndis.h
+@@ -33,6 +33,8 @@
+  * @class: USB class.
+  * @subclass: USB subclass.
+  * @protocol: USB protocol.
++ * @initial_packet_filter: Packet filter applied on RNDIS INIT, or zero to
++ *                        wait for OID_GEN_CURRENT_PACKET_FILTER.
+  * @lock: Protects the data from concurrent access by configfs read/write
+  *        and create symlink/remove symlink operations.
+  * @refcnt: Reference counter for the function instance.
+@@ -52,6 +54,7 @@ struct f_rndis_opts {
+ 	u8				class;
+ 	u8				subclass;
+ 	u8				protocol;
++	u16				initial_packet_filter;
+ 	struct mutex			lock;
+ 	int				refcnt;
+ };
+-- 
+2.54.0
