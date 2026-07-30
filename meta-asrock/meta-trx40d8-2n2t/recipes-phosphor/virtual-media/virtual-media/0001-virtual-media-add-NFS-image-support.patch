@@ -1,0 +1,248 @@
+From 48f5beea26cdf1c8e34a004c54c18967fcfe08bb Mon Sep 17 00:00:00 2001
+From: Till Heinzerling <1684934+hoinzy@users.noreply.github.com>
+Date: Thu, 30 Jul 2026 23:30:00 +0200
+Subject: [PATCH] virtual-media: add NFS image support
+
+The original service supports HTTPS and SMB images, while Redfish also
+defines NFS as a VirtualMedia transfer protocol. Add an NFS share adapter
+that invokes mount without a shell, then serves the selected image through
+the existing nbdkit and USB gadget path.
+
+NFS URLs use the form nfs://server/export/path/image.iso. The parent path is
+mounted for the lifetime of the virtual-media session and is unmounted by
+the existing resource owner during teardown.
+
+Upstream-Status: Pending
+Signed-off-by: Till Heinzerling <1684934+hoinzy@users.noreply.github.com>
+---
+ src/nfs.hpp                    | 61 +++++++++++++++++++++++++++++++++++++++++++
+ src/resources.hpp              |  8 +++---
+ src/state/activating_state.cpp | 62 +++++++++++++++++++++++++++++++++++++++++--
+ src/state/activating_state.hpp |  6 +++++
+ 4 files changed, 132 insertions(+), 5 deletions(-)
+ create mode 100644 src/nfs.hpp
+
+diff --git a/src/nfs.hpp b/src/nfs.hpp
+new file mode 100644
+index 0000000..b5ad173
+--- /dev/null
++++ b/src/nfs.hpp
+@@ -0,0 +1,61 @@
++#pragma once
++
++#include "logger.hpp"
++#include "utils.hpp"
++
++#include <boost/process.hpp>
++#include <filesystem>
++#include <string>
++#include <vector>
++
++namespace fs = std::filesystem;
++
++class NfsShare
++{
++  public:
++    explicit NfsShare(const fs::path& mountDir) : mountDir(mountDir)
++    {}
++
++    bool mount(
++        const fs::path& remote, bool rw,
++        const std::unique_ptr<utils::CredentialsProvider>& credentials)
++    {
++        if (credentials)
++        {
++            LogMsg(Logger::Error,
++                   "Credentials are not supported for NFS shares");
++            return false;
++        }
++
++        const std::string options =
++            std::string(rw ? "rw" : "ro") +
++            ",nosuid,nodev,noexec,soft,timeo=50,retrans=2";
++        const std::vector<std::string> args = {
++            "-t", "nfs", "-o", options, remote.string(), mountDir};
++
++        LogMsg(Logger::Debug, "Trying to mount NFS remote: ", remote);
++
++        try
++        {
++            boost::process::child mountProcess(
++                "/bin/mount", boost::process::args(args));
++            mountProcess.wait();
++            if (mountProcess.exit_code() != 0)
++            {
++                LogMsg(Logger::Error, "NFS mount failed with exit code ",
++                       mountProcess.exit_code());
++                return false;
++            }
++        }
++        catch (const std::exception& error)
++        {
++            LogMsg(Logger::Error, "Unable to execute NFS mount: ",
++                   error.what());
++            return false;
++        }
++
++        return true;
++    }
++
++  private:
++    std::string mountDir;
++};
+diff --git a/src/resources.hpp b/src/resources.hpp
+index 0507fac..a394885 100644
+--- a/src/resources.hpp
++++ b/src/resources.hpp
+@@ -73,16 +73,17 @@ class Mount
+     Mount& operator=(const Mount&) = delete;
+     Mount& operator=(Mount&& other) = delete;
+ 
++    template <typename Share>
+     explicit Mount(
+-        std::unique_ptr<Directory> directory, SmbShare& smb,
++        std::unique_ptr<Directory> directory, Share& share,
+         const std::filesystem::path& remote, bool rw,
+         const std::unique_ptr<utils::CredentialsProvider>& credentials) :
+         directory(std::move(directory))
+     {
+-        if (!smb.mount(remote, rw, credentials))
++        if (!share.mount(remote, rw, credentials))
+         {
+             throw Error(std::errc::invalid_argument,
+-                        "Failed to mount CIFS share");
++                        "Failed to mount remote share");
+         }
+     }
+ 
+diff --git a/src/state/activating_state.cpp b/src/state/activating_state.cpp
+index ac71c1e..6ec6922 100644
+--- a/src/state/activating_state.cpp
++++ b/src/state/activating_state.cpp
+@@ -1,6 +1,7 @@
+ #include "activating_state.hpp"
+ 
+ #include "active_state.hpp"
++#include "nfs.hpp"
+ 
+ #include <sys/mount.h>
+ 
+@@ -114,6 +115,10 @@ std::unique_ptr<BasicState> ActivatingState::activateLegacyMode()
+     {
+         return mountHttpsShare();
+     }
++    if (isNfsUrl(machine.getTarget()->imgUrl))
++    {
++        return mountNfsShare();
++    }
+ 
+     return std::make_unique<ReadyState>(machine, std::errc::invalid_argument,
+                                         "URL not recognized");
+@@ -164,6 +169,52 @@ std::unique_ptr<BasicState> ActivatingState::mountHttpsShare()
+     return nullptr;
+ }
+ 
++std::unique_ptr<BasicState> ActivatingState::mountNfsShare()
++{
++    try
++    {
++        std::string remote;
++        if (!getImagePathFromNfsUrl(machine.getTarget()->imgUrl, &remote))
++        {
++            return std::make_unique<ReadyState>(
++                machine, std::errc::invalid_argument, "Invalid NFS URL");
++        }
++
++        const auto separator = remote.find_last_of('/');
++        if (separator == std::string::npos || separator + 1 >= remote.size())
++        {
++            return std::make_unique<ReadyState>(
++                machine, std::errc::invalid_argument,
++                "NFS URL does not identify an image");
++        }
++
++        const fs::path remoteParent = remote.substr(0, separator);
++        const fs::path imageName = remote.substr(separator + 1);
++        auto mountDir =
++            std::make_unique<resource::Directory>(machine.getName());
++        const fs::path localFile = mountDir->getPath() / imageName;
++
++        NfsShare nfs(mountDir->getPath());
++        machine.getTarget()->mountPoint = std::make_unique<resource::Mount>(
++            std::move(mountDir), nfs, remoteParent, machine.getTarget()->rw,
++            machine.getTarget()->credentials);
++
++        process = spawnNbdKit(machine, localFile);
++        if (!process)
++        {
++            return std::make_unique<ReadyState>(
++                machine, std::errc::operation_canceled,
++                "Unable to setup NbdKit");
++        }
++        return nullptr;
++    }
++    catch (const resource::Error& error)
++    {
++        return std::make_unique<ReadyState>(machine, error.errorCode,
++                                            error.what());
++    }
++}
++
+ std::unique_ptr<resource::Process>
+     ActivatingState::spawnNbdKit(interfaces::MountPointStateMachine& machine,
+                                  std::unique_ptr<utils::VolatileFile>&& secret,
+@@ -342,6 +393,29 @@ bool ActivatingState::isCifsUrl(const std::string& imageUrl)
+     return checkUrl("smb://", imageUrl);
+ }
+ 
++bool ActivatingState::isNfsUrl(const std::string& imageUrl)
++{
++    return checkUrl("nfs://", imageUrl);
++}
++
++bool ActivatingState::getImagePathFromNfsUrl(const std::string& imageUrl,
++                                             std::string* imagePath)
++{
++    if (!isNfsUrl(imageUrl) || imagePath == nullptr)
++    {
++        return false;
++    }
++    const std::string remote = imageUrl.substr(std::string("nfs://").size());
++    const auto pathStart = remote.find('/');
++    if (pathStart == std::string::npos || pathStart == 0)
++    {
++        return false;
++    }
++    *imagePath = remote.substr(0, pathStart) + ":" +
++                 remote.substr(pathStart);
++    return true;
++}
++
+ bool ActivatingState::getImagePathFromCifsUrl(const std::string& imageUrl,
+                                               std::string* imagePath)
+ {
+diff --git a/src/state/activating_state.hpp b/src/state/activating_state.hpp
+index 9ce4cf2..f9dce91 100644
+--- a/src/state/activating_state.hpp
++++ b/src/state/activating_state.hpp
+@@ -29,6 +29,7 @@ struct ActivatingState : public BasicStateT<ActivatingState>
+     std::unique_ptr<BasicState> activateLegacyMode();
+     std::unique_ptr<BasicState> mountSmbShare();
+     std::unique_ptr<BasicState> mountHttpsShare();
++    std::unique_ptr<BasicState> mountNfsShare();
+ 
+     static std::unique_ptr<resource::Process>
+         spawnNbdKit(interfaces::MountPointStateMachine& machine,
+@@ -50,5 +51,10 @@ struct ActivatingState : public BasicStateT<ActivatingState>
+     static bool getImagePathFromCifsUrl(const std::string& imageUrl,
+                                         std::string* imagePath);
++
++    static bool isNfsUrl(const std::string& imageUrl);
++    static bool getImagePathFromNfsUrl(const std::string& imageUrl,
++                                       std::string* imagePath);
++
+     static fs::path getImagePath(const std::string& imageUrl);
+ 
+     std::unique_ptr<resource::Process> process;
+-- 
+2.50.1

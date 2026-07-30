@@ -29,4 +29,5 @@ RDEPENDS:${PN}-system = " \
         phosphor-ipmi-blobs \
         ami-host-interface \
         ami-host-inventory \
+        virtual-media \
         "

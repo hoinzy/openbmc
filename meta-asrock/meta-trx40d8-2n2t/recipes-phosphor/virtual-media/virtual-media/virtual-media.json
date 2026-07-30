@@ -1,0 +1,13 @@
+{
+    "InactivityTimeout": 1800,
+    "MountPoints": {
+        "Slot_1": {
+            "EndpointId": "",
+            "Mode": 1,
+            "NBDDevice": "nbd1",
+            "UnixSocket": "/run/virtual-media/nbd1.sock",
+            "Timeout": 90,
+            "BlockSize": 512
+        }
+    }
+}

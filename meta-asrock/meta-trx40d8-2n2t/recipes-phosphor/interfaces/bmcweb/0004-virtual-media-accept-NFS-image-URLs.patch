@@ -1,0 +1,93 @@
+From 6ab641062e1bd10f7585cd32cfb163d85118581c Mon Sep 17 00:00:00 2001
+From: Till Heinzerling <1684934+hoinzy@users.noreply.github.com>
+Date: Thu, 30 Jul 2026 23:35:00 +0200
+Subject: [PATCH] virtual-media: accept NFS image URLs
+
+The Redfish VirtualMedia TransferProtocolType enum includes NFS and the
+platform virtual-media service can mount NFS-backed images. Accept nfs://
+URLs and map them to the standard NFS transfer protocol value.
+
+Upstream-Status: Pending
+Signed-off-by: Till Heinzerling <1684934+hoinzy@users.noreply.github.com>
+---
+ redfish-core/lib/virtual_media.hpp | 22 ++++++++++++++++++----
+ 1 file changed, 18 insertions(+), 4 deletions(-)
+
+diff --git a/redfish-core/lib/virtual_media.hpp b/redfish-core/lib/virtual_media.hpp
+index 839ef93a..b38df9d2 100644
+--- a/redfish-core/lib/virtual_media.hpp
++++ b/redfish-core/lib/virtual_media.hpp
+@@ -143,6 +143,10 @@ inline std::string getTransferProtocolTypeFromUri(const std::string& imageUri)
+     {
+         return "HTTPS";
+     }
++    if (scheme == "nfs")
++    {
++        return "NFS";
++    }
+ 
+     return "None";
+ }
+@@ -366,6 +370,7 @@ enum class TransferProtocol
+ {
+     https,
+     smb,
++    nfs,
+     invalid
+ };
+ 
+@@ -385,6 +390,10 @@ inline std::optional<TransferProtocol> getTransferProtocolFromUri(
+     {
+         return TransferProtocol::https;
+     }
++    if (scheme == "nfs")
++    {
++        return TransferProtocol::nfs;
++    }
+     if (!scheme.empty())
+     {
+         return TransferProtocol::invalid;
+@@ -416,6 +425,11 @@ inline std::optional<TransferProtocol> getTransferProtocolFromParam(
+         return TransferProtocol::https;
+     }
+ 
++    if (*transferProtocolType == "NFS")
++    {
++        return TransferProtocol::nfs;
++    }
++
+     return TransferProtocol::invalid;
+ }
+ 
+@@ -438,6 +452,11 @@ inline std::string getUriWithTransferProtocol(
+         return "https://" + imageUri;
+     }
+ 
++    if (transferProtocol == TransferProtocol::nfs)
++    {
++        return "nfs://" + imageUri;
++    }
++
+     return imageUri;
+ }
+ 
+@@ -590,7 +609,7 @@ inline void validateParams(const std::shared_ptr<bmcweb::AsyncResp>& asyncResp,
+     {
+         BMCWEB_LOG_ERROR("Request action parameter ImageUrl must "
+                          "contain specified protocol type from list: "
+-                         "(smb, https).");
++                         "(smb, https, nfs).");
+ 
+         messages::resourceAtUriInUnknownFormat(asyncResp->res, *url);
+ 
+@@ -603,7 +622,7 @@ inline void validateParams(const std::shared_ptr<bmcweb::AsyncResp>& asyncResp,
+     {
+         BMCWEB_LOG_ERROR("Request action parameter TransferProtocolType "
+                          "must be provided with value from list: "
+-                         "(CIFS, HTTPS).");
++                         "(CIFS, HTTPS, NFS).");
+ 
+         messages::propertyValueNotInList(
+             asyncResp->res, actionParams.transferProtocolType.value_or(""),
+-- 
+2.50.1
