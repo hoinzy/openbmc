@@ -5,7 +5,7 @@ directory are:
 
 ```text
 /home/ubuntu/openbmc-trx40-build/src-agent-f4b13f40b1
-/home/ubuntu/openbmc-trx40-build/src-agent-f4b13f40b1/build
+/home/ubuntu/openbmc-trx40-build/build-trx40d8-f4b13f40b1
 ```
 
 The checkout is the `agent/trx40d8-initial-port` branch. Fetch the latest
@@ -24,7 +24,7 @@ will reuse completed work from the build cache.
 
 ```bash
 cd /home/ubuntu/openbmc-trx40-build/src-agent-f4b13f40b1
-source ./setup trx40d8-2n2t build
+source ./setup trx40d8-2n2t /home/ubuntu/openbmc-trx40-build/build-trx40d8-f4b13f40b1
 export BB_NUMBER_THREADS=64
 export PARALLEL_MAKE="-j 64"
 bitbake obmc-phosphor-image
@@ -46,7 +46,7 @@ restore() {
 trap restore EXIT HUP INT TERM
 sudo sysctl -q kernel.apparmor_restrict_unprivileged_userns=0
 cd /home/ubuntu/openbmc-trx40-build/src-agent-f4b13f40b1
-source ./setup trx40d8-2n2t build
+source ./setup trx40d8-2n2t /home/ubuntu/openbmc-trx40-build/build-trx40d8-f4b13f40b1
 export BB_NUMBER_THREADS=64
 export PARALLEL_MAKE="-j 64"
 bitbake obmc-phosphor-image
@@ -69,7 +69,7 @@ network fetch fails, retry the same command first. For a crate fetch that has
 repeatedly failed, download it into the build download cache and resume:
 
 ```bash
-cd /home/ubuntu/openbmc-trx40-build/src-agent-f4b13f40b1/build/downloads
+cd /home/ubuntu/openbmc-trx40-build/build-trx40d8-f4b13f40b1/downloads
 curl -fL --retry 5 --retry-all-errors \
   -o bstr-1.12.1.crate \
   https://static.crates.io/crates/bstr/1.12.1/download
@@ -80,14 +80,14 @@ curl -fL --retry 5 --retry-all-errors \
 After a successful build, the web-update archive is under:
 
 ```text
-/home/ubuntu/openbmc-trx40-build/src-agent-f4b13f40b1/build/tmp/deploy/images/trx40d8-2n2t/
+/home/ubuntu/openbmc-trx40-build/build-trx40d8-f4b13f40b1/tmp/deploy/images/trx40d8-2n2t/
 ```
 
 Select the file ending in `.static.mtd.tar`. Verify its manifest before
 copying it off the host:
 
 ```bash
-artifact=$(find /home/ubuntu/openbmc-trx40-build/src-agent-f4b13f40b1/build/tmp/deploy/images/trx40d8-2n2t \
+artifact=$(find /home/ubuntu/openbmc-trx40-build/build-trx40d8-f4b13f40b1/tmp/deploy/images/trx40d8-2n2t \
   -maxdepth 1 -type f -name '*.static.mtd.tar' -printf '%T@ %p\\n' | sort -nr | head -1 | cut -d' ' -f2-)
 sha256sum "$artifact"
 tar -xOf "$artifact" MANIFEST
@@ -104,4 +104,3 @@ scp -O ubuntu@threadripper:"$artifact" .
 Do not reboot the Threadripper while BitBake is running. A reboot interrupts
 the build, but does not invalidate the existing sstate or download cache;
 rerun the start/resume command afterward.
-
