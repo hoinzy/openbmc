@@ -9,6 +9,7 @@ SRC_URI = " \
     git://github.com/Intel-BMC/virtual-media.git;branch=main;protocol=https \
     file://0001-virtual-media-add-NFS-image-support.patch \
     file://0002-virtual-media-list-images-on-SMB-and-NFS-shares.patch \
+    file://0003-virtual-media-use-Boost.Process-v1-compatibility-API.patch \
     file://virtual-media.json \
     "
 SRCREV = "1306c2132bdb9d5ad6deb00cd8a1d920753f7ea7"

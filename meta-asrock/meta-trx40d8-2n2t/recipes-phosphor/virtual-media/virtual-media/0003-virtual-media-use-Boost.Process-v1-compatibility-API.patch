@@ -1,0 +1,130 @@
+From 9f44fece25bc766dab35de2a1cbc65583e576f91 Mon Sep 17 00:00:00 2001
+From: Till Heinzerling <1684934+hoinzy@users.noreply.github.com>
+Date: Fri, 31 Jul 2026 00:01:33 +0200
+Subject: [PATCH] virtual-media: use Boost.Process v1 compatibility API
+
+Boost 1.89 and newer made Boost.Process v2 the default and moved the previous API under boost/process/v1. Include and qualify the compatibility API explicitly so this service continues to build without pinning an obsolete Boost release.
+
+Upstream-Status: Pending
+Signed-off-by: Till Heinzerling <1684934+hoinzy@users.noreply.github.com>
+---
+ src/main.cpp                   |  2 +-
+ src/nfs.hpp                    |  6 +++---
+ src/state/activating_state.cpp |  2 +-
+ src/system.hpp                 | 13 +++++++------
+ src/utils.hpp                  |  4 ++--
+ 5 files changed, 14 insertions(+), 13 deletions(-)
+
+diff --git a/src/main.cpp b/src/main.cpp
+index a20c68a..f82dd8f 100644
+--- a/src/main.cpp
++++ b/src/main.cpp
+@@ -13,7 +13,7 @@
+ #include <boost/asio/spawn.hpp>
+ #include <boost/container/flat_map.hpp>
+ #include <boost/container/flat_set.hpp>
+-#include <boost/process.hpp>
++#include <boost/process/v1.hpp>
+ #include <filesystem>
+ #include <iostream>
+ #include <memory>
+diff --git a/src/nfs.hpp b/src/nfs.hpp
+index 9176dc4..d000ffe 100644
+--- a/src/nfs.hpp
++++ b/src/nfs.hpp
+@@ -3,7 +3,7 @@
+ #include "logger.hpp"
+ #include "utils.hpp"
+ 
+-#include <boost/process.hpp>
++#include <boost/process/v1.hpp>
+ #include <filesystem>
+ #include <string>
+ #include <vector>
+@@ -38,8 +38,8 @@ class NfsShare
+ 
+         try
+         {
+-            boost::process::child mountProcess(
+-                "/bin/mount", boost::process::args(args));
++            boost::process::v1::child mountProcess(
++                "/bin/mount", boost::process::v1::args(args));
+             mountProcess.wait();
+             if (mountProcess.exit_code() != 0)
+             {
+diff --git a/src/state/activating_state.cpp b/src/state/activating_state.cpp
+index 95f32c7..41e59fa 100644
+--- a/src/state/activating_state.cpp
++++ b/src/state/activating_state.cpp
+@@ -11,7 +11,7 @@
+ #include <boost/asio/spawn.hpp>
+ #include <boost/container/flat_map.hpp>
+ #include <boost/container/flat_set.hpp>
+-#include <boost/process.hpp>
++#include <boost/process/v1.hpp>
+ #include <boost/system/detail/error_code.hpp>
+ #include <filesystem>
+ #include <iostream>
+diff --git a/src/system.hpp b/src/system.hpp
+index d0af549..f23e3d8 100644
+--- a/src/system.hpp
++++ b/src/system.hpp
+@@ -6,7 +6,7 @@
+ #include <boost/asio.hpp>
+ #include <boost/asio/spawn.hpp>
+ #include <boost/container/flat_map.hpp>
+-#include <boost/process.hpp>
++#include <boost/process/v1.hpp>
+ #include <filesystem>
+ #include <fstream>
+ #include <sdbusplus/asio/object_server.hpp>
+@@ -361,9 +361,10 @@ class Process : public std::enable_shared_from_this<Process>
+     {
+         std::error_code ec;
+         LogMsg(Logger::Debug, "[Process]: Spawning ", app, " (", args, ")");
+-        child = boost::process::child(
+-            app, boost::process::args(args),
+-            (boost::process::std_out & boost::process::std_err) > pipe, ec,
++        child = boost::process::v1::child(
++            app, boost::process::v1::args(args),
++            (boost::process::v1::std_out & boost::process::v1::std_err) > pipe,
++            ec,
+             ioc);
+ 
+         if (ec)
+@@ -470,8 +471,8 @@ class Process : public std::enable_shared_from_this<Process>
+ 
+   private:
+     boost::asio::io_context& ioc;
+-    boost::process::child child;
+-    boost::process::async_pipe pipe;
++    boost::process::v1::child child;
++    boost::process::v1::async_pipe pipe;
+     std::string name;
+     std::string app;
+     const NBDDevice& dev;
+diff --git a/src/utils.hpp b/src/utils.hpp
+index c610e97..46f0f61 100644
+--- a/src/utils.hpp
++++ b/src/utils.hpp
+@@ -6,7 +6,7 @@
+ 
+ #include <algorithm>
+ #include <boost/asio/steady_timer.hpp>
+-#include <boost/process/async_pipe.hpp>
++#include <boost/process/v1/async_pipe.hpp>
+ #include <boost/type_traits/has_dereference.hpp>
+ #include <cctype>
+ #include <filesystem>
+@@ -256,7 +256,7 @@ class NamedPipe
+     }
+ 
+     const std::string name;
+-    boost::process::async_pipe impl;
++    boost::process::v1::async_pipe impl;
+     Buffer buffer;
+ };
+ 
+-- 
+2.50.1 (Apple Git-155)
+
