@@ -4,15 +4,15 @@ The build host is `threadripper` (`192.168.178.179`). The checkout and build
 directory are:
 
 ```text
-/home/ubuntu/openbmc-trx40-build/src-agent-f4b13f40b1
-/home/ubuntu/openbmc-trx40-build/build-trx40d8-f4b13f40b1
+/home/ubuntu/openbmc-trx40-build/src-agent-5883e0b15f
+/home/ubuntu/openbmc-trx40-build/build-trx40d8-5883e0b15f
 ```
 
 The checkout is the `agent/trx40d8-initial-port` branch. Fetch the latest
 branch before building:
 
 ```bash
-cd /home/ubuntu/openbmc-trx40-build/src-agent-f4b13f40b1
+cd /home/ubuntu/openbmc-trx40-build/src-agent-5883e0b15f
 git fetch origin agent/trx40d8-initial-port
 git merge --ff-only FETCH_HEAD
 ```
@@ -29,8 +29,8 @@ BB_NUMBER_PARSE_THREADS = "8"
 PARALLEL_MAKE = "-j 64"
 EOF
 
-cd /home/ubuntu/openbmc-trx40-build/src-agent-f4b13f40b1
-source ./setup trx40d8-2n2t /home/ubuntu/openbmc-trx40-build/build-trx40d8-f4b13f40b1
+cd /home/ubuntu/openbmc-trx40-build/src-agent-5883e0b15f
+source ./setup trx40d8-2n2t /home/ubuntu/openbmc-trx40-build/build-trx40d8-5883e0b15f
 bitbake -R /tmp/openbmc-bitbake-j64.conf obmc-phosphor-image
 ```
 
@@ -53,7 +53,7 @@ build with a persistent log:
 
 ```bash
 buildroot=/home/ubuntu/openbmc-trx40-build
-src="$buildroot/src-agent-f4b13f40b1"
+src="$buildroot/src-agent-5883e0b15f"
 log="$buildroot/build-$(git -C "$src" rev-parse --short HEAD).log"
 
 nohup bash -c '
@@ -65,8 +65,8 @@ restore() {
 trap restore EXIT
 trap 'exit 1' HUP INT TERM
 sudo sysctl -q kernel.apparmor_restrict_unprivileged_userns=0
-cd /home/ubuntu/openbmc-trx40-build/src-agent-f4b13f40b1
-source ./setup trx40d8-2n2t /home/ubuntu/openbmc-trx40-build/build-trx40d8-f4b13f40b1
+cd /home/ubuntu/openbmc-trx40-build/src-agent-5883e0b15f
+source ./setup trx40d8-2n2t /home/ubuntu/openbmc-trx40-build/build-trx40d8-5883e0b15f
 bitbake -R /tmp/openbmc-bitbake-j64.conf obmc-phosphor-image
 ' >"$log" 2>&1 < /dev/null &
 echo "Build log: $log"
@@ -89,7 +89,7 @@ network fetch fails, retry the same command first. For a crate fetch that has
 repeatedly failed, download it into the build download cache and resume:
 
 ```bash
-cd /home/ubuntu/openbmc-trx40-build/build-trx40d8-f4b13f40b1/downloads
+cd /home/ubuntu/openbmc-trx40-build/build-trx40d8-5883e0b15f/downloads
 curl -fL --retry 5 --retry-all-errors \
   -o bstr-1.12.1.crate \
   https://static.crates.io/crates/bstr/1.12.1/download
@@ -120,14 +120,14 @@ sudo dmesg --ctime |
 After a successful build, the web-update archive is under:
 
 ```text
-/home/ubuntu/openbmc-trx40-build/build-trx40d8-f4b13f40b1/tmp/deploy/images/trx40d8-2n2t/
+/home/ubuntu/openbmc-trx40-build/build-trx40d8-5883e0b15f/tmp/deploy/images/trx40d8-2n2t/
 ```
 
 Select the file ending in `.static.mtd.tar`. Verify its manifest before
 copying it off the host:
 
 ```bash
-deploy=/home/ubuntu/openbmc-trx40-build/build-trx40d8-f4b13f40b1/tmp/deploy/images/trx40d8-2n2t
+deploy=/home/ubuntu/openbmc-trx40-build/build-trx40d8-5883e0b15f/tmp/deploy/images/trx40d8-2n2t
 artifact=$(readlink -f "$deploy/obmc-phosphor-image-trx40d8-2n2t.static.mtd.tar")
 sha256sum "$artifact"
 tar -xOf "$artifact" MANIFEST

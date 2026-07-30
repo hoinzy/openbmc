@@ -201,9 +201,17 @@ surfaces use `bios-settings-mgr` and that applying settings has no host OS
 dependency.
 
 No changed BIOS value has yet been applied. Factory-default reset and BIOS
-password actions are also not implemented. The uploaded `/bios/` assets and
-their API calls were checked over HTTPS, but a visual browser render remains a
-separate validation item.
+password actions are also not implemented. The board WebUI now exposes an
+administrator-only **Operations -> BIOS configuration** page that embeds the
+uploaded `/bios/` application. The parent WebUI permits only same-origin
+frames, while the child route uses `SAMEORIGIN` and a route-specific CSP.
+
+The uploaded AMI JavaScript duplicates the complete current-BIOS path when it
+constructs its initial configuration request. bmcweb accepts only that exact
+authenticated compatibility alias; unauthenticated management-LAN requests
+remain rejected. The live WebUI bundle, registry request, current-settings
+request, assets, frame headers, and zero-pending state were checked over
+HTTPS. A visual browser screenshot remains a separate validation item.
 
 ## Independent SMI mailbox lead: GPIO 219
 

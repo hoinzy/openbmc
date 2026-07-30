@@ -325,6 +325,24 @@ the same registry. Ubuntu had not started, proving the setting exchange has no
 host OS dependency. The value remained `Onboard VGA`; changed-value behavior,
 default reset, and password operations remain unvalidated.
 
+A later RAM-overlay test installed the board-specific WebUI and bmcweb from
+commit `cd44e82b7c`. The WebUI bundle contains the administrator-only
+`/operations/bios-configuration` route, the `BIOS configuration` navigation
+label, and a same-origin `/bios/` frame. The standard root HTML retains
+`X-Frame-Options: DENY` and `frame-ancestors 'none'`, but its CSP permits
+same-origin child frames. `/bios/` returns
+`X-Frame-Options: SAMEORIGIN` with `frame-ancestors 'self'`.
+
+The AMI setup JavaScript constructs the duplicated path
+`/redfish/v1/Systems/Self/Bios/redfish/v1/Systems/Self/Bios/` for its initial
+configuration GET. The board compatibility route returned HTTP 200 with all
+123 firmware fields, including private `MAPIDS`; the same request without a
+BMC session returned HTTP 401. The registry route and standard system BIOS
+resource each returned 122 public attributes, the Settings resource contained
+zero pending attributes, and `/bios/`, `Index.js`, `Index.css`, `Favicon.ico`,
+and `RbLogo.png` all returned HTTP 200. No BIOS setting was changed. An
+automated visual browser capture remains outstanding.
+
 ## AMI UEFI inventory boot trace
 
 During a complete host reboot, the installed OpenBMC image kept the dedicated
