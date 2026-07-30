@@ -1,0 +1,139 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: OpenBMC Builder <openbmc-builder@users.noreply.github.com>
+Date: Thu, 30 Jul 2026 22:45:00 +0200
+Subject: [PATCH] webui-vue: add BIOS configuration page
+
+Expose the firmware-provided BIOS setup application inside the authenticated
+OpenBMC WebUI.  Keep the entry administrator-only because it can stage host
+firmware changes.
+
+Upstream-Status: Pending [generic BIOS settings user experience]
+---
+ src/components/AppNavigation/AppNavigationMixin.js |  6 ++++
+ src/locales/en-US.json                             |  6 ++++
+ src/router/routes.js                               | 10 +++++++
+ .../BiosConfiguration/BiosConfiguration.vue        | 33 ++++++++++++++++++++++
+ src/views/Operations/BiosConfiguration/index.js    |  2 ++
+ 5 files changed, 57 insertions(+)
+
+diff --git a/src/components/AppNavigation/AppNavigationMixin.js b/src/components/AppNavigation/AppNavigationMixin.js
+index dc9e050..99db3e8 100644
+--- a/src/components/AppNavigation/AppNavigationMixin.js
++++ b/src/components/AppNavigation/AppNavigationMixin.js
+@@ -88,6 +88,12 @@ const AppNavigationMixin = {
+               label: i18n.global.t('appNavigation.kvm'),
+               route: '/operations/kvm',
+             },
++            {
++              id: 'bios-configuration',
++              label: i18n.global.t('appNavigation.biosConfiguration'),
++              route: '/operations/bios-configuration',
++              exclusiveToRoles: [roles.administrator],
++            },
+             {
+               id: 'key-clear',
+               label: i18n.global.t('appNavigation.keyClear'),
+diff --git a/src/locales/en-US.json b/src/locales/en-US.json
+index b4e1df0..7ea056f 100644
+--- a/src/locales/en-US.json
++++ b/src/locales/en-US.json
+@@ -125,6 +125,7 @@
+         "dumps": "@:appPageTitle.dumps",
+         "eventLogs": "@:appPageTitle.eventLogs",
+         "factoryReset": "@:appPageTitle.factoryReset",
++        "biosConfiguration": "@:appPageTitle.biosConfiguration",
+         "firmware": "@:appPageTitle.firmware",
+         "hardwareStatus": "Hardware status",
+         "inventory": "@:appPageTitle.inventory",
+@@ -156,6 +157,7 @@
+         "dumps": "Dumps",
+         "eventLogs": "Event logs",
+         "factoryReset": "Factory reset",
++        "biosConfiguration": "BIOS configuration",
+         "firmware": "Firmware",
+         "inventory": "Inventory and LEDs",
+         "kvm": "KVM",
+@@ -178,6 +180,10 @@
+         "virtualMedia": "Virtual media",
+         "keyClear": "Key clear"
+     },
++    "pageBiosConfiguration": {
++        "description": "Review or stage firmware settings. Saved changes are applied by the host firmware on the next server boot.",
++        "frameTitle": "Host BIOS configuration"
++    },
+     "pageChangePassword": {
+         "changePassword": "Change password",
+         "changePasswordAlertMessage": "The password is expired and must be changed.",
+diff --git a/src/router/routes.js b/src/router/routes.js
+index f3f6f6b..eb77f4c 100644
+--- a/src/router/routes.js
++++ b/src/router/routes.js
+@@ -1,4 +1,5 @@
+ import AppLayout from '@/layouts/AppLayout.vue';
++import BiosConfiguration from '@/views/Operations/BiosConfiguration';
+ import ChangePassword from '@/views/ChangePassword';
+ import ConsoleLayout from '@/layouts/ConsoleLayout.vue';
+ import DateTime from '@/views/Settings/DateTime';
+@@ -233,6 +234,15 @@ const routes = [
+           title: i18n.global.t('appPageTitle.kvm'),
+         },
+       },
++      {
++        path: '/operations/bios-configuration',
++        name: 'bios-configuration',
++        component: BiosConfiguration,
++        meta: {
++          title: i18n.global.t('appPageTitle.biosConfiguration'),
++          exclusiveToRoles: [roles.administrator],
++        },
++      },
+       {
+         path: '/operations/firmware',
+         name: 'firmware',
+diff --git a/src/views/Operations/BiosConfiguration/BiosConfiguration.vue b/src/views/Operations/BiosConfiguration/BiosConfiguration.vue
+new file mode 100644
+index 0000000..dc83a30
+--- /dev/null
++++ b/src/views/Operations/BiosConfiguration/BiosConfiguration.vue
+@@ -0,0 +1,33 @@
++<template>
++  <b-container fluid>
++    <page-title
++      class="mb-4"
++      :description="$t('pageBiosConfiguration.description')"
++    />
++    <iframe
++      class="bios-configuration-frame"
++      src="/bios/"
++      :title="$t('pageBiosConfiguration.frameTitle')"
++    ></iframe>
++  </b-container>
++</template>
++
++<script>
++import PageTitle from '@/components/Global/PageTitle';
++
++export default {
++  name: 'BiosConfiguration',
++  components: {
++    PageTitle,
++  },
++};
++</script>
++
++<style scoped>
++.bios-configuration-frame {
++  width: 100%;
++  min-height: calc(100vh - 13rem);
++  border: 1px solid #d8d8d8;
++  background: #fff;
++}
++</style>
+diff --git a/src/views/Operations/BiosConfiguration/index.js b/src/views/Operations/BiosConfiguration/index.js
+new file mode 100644
+index 0000000..44bdfb5
+--- /dev/null
++++ b/src/views/Operations/BiosConfiguration/index.js
+@@ -0,0 +1,2 @@
++import BiosConfiguration from './BiosConfiguration.vue';
++export default BiosConfiguration;

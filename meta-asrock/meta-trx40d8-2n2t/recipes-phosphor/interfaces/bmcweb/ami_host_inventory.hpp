@@ -850,6 +850,20 @@ inline void handleAmiBiosWebFileGet(
     if (extension == ".html")
     {
         contentType = "text/html;charset=UTF-8";
+        asyncResp->res.addHeader(
+            boost::beast::http::field::x_frame_options, "SAMEORIGIN");
+        asyncResp->res.addHeader(
+            "Content-Security-Policy",
+            "default-src 'none'; "
+            "img-src 'self' data:; "
+            "font-src 'self'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "script-src 'self' 'unsafe-inline'; "
+            "connect-src 'self'; "
+            "form-action 'none'; "
+            "frame-ancestors 'self'; "
+            "object-src 'none'; "
+            "base-uri 'none'");
     }
     else if (extension == ".css")
     {
@@ -896,6 +910,43 @@ inline bool isAmiBiosRegistryFilename(std::string_view filename)
            filename.ends_with(".json") &&
            filename.find('/') == std::string_view::npos &&
            filename.find('\\') == std::string_view::npos;
+}
+
+inline void handleAmiBiosRegistryGet(
+    const crow::Request& req,
+    const std::shared_ptr<bmcweb::AsyncResp>& asyncResp,
+    const std::string& filename)
+{
+    if (!checkAmiBiosClient(req))
+    {
+        rejectAmiHostRequest(req, asyncResp);
+        return;
+    }
+    if (!isAmiBiosRegistryFilename(filename))
+    {
+        messages::resourceNotFound(asyncResp->res, "AttributeRegistry",
+                                   filename);
+        return;
+    }
+
+    std::optional<std::string> stored =
+        loadAmiFile(amiBiosDataDirectory, filename);
+    if (!stored)
+    {
+        messages::resourceNotFound(asyncResp->res, "AttributeRegistry",
+                                   filename);
+        return;
+    }
+
+    nlohmann::json registry =
+        nlohmann::json::parse(*stored, nullptr, false);
+    if (!registry.is_object())
+    {
+        BMCWEB_LOG_ERROR("Stored AMI BIOS registry {} is invalid", filename);
+        messages::internalError(asyncResp->res);
+        return;
+    }
+    asyncResp->res.jsonValue = std::move(registry);
 }
 
 inline std::optional<nlohmann::json> parseAmiJsonBody(

@@ -12,10 +12,16 @@ AMI firmware names the singleton system "Self".  Route that alias to the
 firmware-compatible current-settings response because Crow otherwise
 selects bmcweb's generic parameterized BIOS route.
 
+Serve the firmware-supplied BIOS Attribute Registry through the standard
+registry route as well.  AMI's setup application derives that URL from the
+AttributeRegistry property, and generic clients need the same registry to
+render the published attributes.
+
 Upstream-Status: Pending [bios-settings-mgr Redfish integration]
 ---
- redfish-core/lib/bios.hpp | 50 +++++++++++++++++++++++++++++++++++++++
- 1 file changed, 50 insertions(+)
+ redfish-core/lib/bios.hpp               | 50 ++++++++++++++++++++++++++
+ redfish-core/lib/message_registries.hpp |  7 ++++
+ 2 files changed, 57 insertions(+)
 
 diff --git a/redfish-core/lib/bios.hpp b/redfish-core/lib/bios.hpp
 index ddbd77cc..adcbfff3 100644
@@ -74,3 +80,22 @@ index ddbd77cc..adcbfff3 100644
 +            }
 +        });
 +
+diff --git a/redfish-core/lib/message_registries.hpp b/redfish-core/lib/message_registries.hpp
+index a7e9cf62..7432db61 100644
+--- a/redfish-core/lib/message_registries.hpp
++++ b/redfish-core/lib/message_registries.hpp
+@@ -4,0 +5 @@
++#include "ami_host_inventory.hpp"
+@@ -75,6 +76,12 @@ inline void handleMessageRoutesMessageRegistryFileGet(
+     {
+         return;
+     }
++    if (isAmiBiosRegistryFilename(registry))
++    {
++        handleAmiBiosRegistryGet(req, asyncResp, registry);
++        return;
++    }
++
+     std::string dmtf = "DMTF ";
+     std::optional<registries::RegistryEntryRef> registryEntry =
+         registries::getRegistryFromPrefix(registry);

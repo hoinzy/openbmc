@@ -5,6 +5,7 @@ DEPENDS:append:trx40d8-2n2t = " phosphor-dbus-interfaces"
 SRC_URI:append:trx40d8-2n2t = " \
     file://0001-bmcweb-add-AMI-host-inventory-routes.patch \
     file://0002-bmcweb-expose-bios-settings-manager.patch \
+    file://0003-bmcweb-allow-same-origin-bios-ui.patch \
     file://ami_host_inventory.hpp \
     "
 
