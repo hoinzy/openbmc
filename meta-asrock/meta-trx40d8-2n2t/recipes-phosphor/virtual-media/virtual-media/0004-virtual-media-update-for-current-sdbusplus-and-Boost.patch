@@ -1,4 +1,4 @@
-From 8b2fba23b0e5d7c4e9f7d26e3e34be543dbd1592 Mon Sep 17 00:00:00 2001
+From bcd9e9a34f4731a00e0141127f5951093a78e534 Mon Sep 17 00:00:00 2001
 From: Till Heinzerling <1684934+hoinzy@users.noreply.github.com>
 Date: Fri, 31 Jul 2026 00:06:35 +0200
 Subject: [PATCH] virtual-media: update for current sdbusplus and Boost.Asio
@@ -13,7 +13,7 @@ overload so current GCC does not reject the archived state classes with
 Upstream-Status: Pending
 Signed-off-by: Till Heinzerling <1684934+hoinzy@users.noreply.github.com>
 ---
- meson.build                      |  6 +++---
+ meson.build                      |  8 ++++----
  src/state/activating_state.hpp   |  2 ++
  src/state/active_state.hpp       |  6 ++++--
  src/state/deactivating_state.hpp |  2 ++
@@ -21,10 +21,10 @@ Signed-off-by: Till Heinzerling <1684934+hoinzy@users.noreply.github.com>
  src/state/ready_state.hpp        |  2 ++
  src/system.hpp                   | 11 ++++++-----
  src/utils.hpp                    |  2 +-
- 8 files changed, 22 insertions(+), 11 deletions(-)
+ 8 files changed, 23 insertions(+), 12 deletions(-)
 
 diff --git a/meson.build b/meson.build
-index ad24d31..3e41aaa 100644
+index ad24d31..d46ec1a 100644
 --- a/meson.build
 +++ b/meson.build
 @@ -4,15 +4,15 @@ project(
@@ -46,6 +46,15 @@ index ad24d31..3e41aaa 100644
  endif
  
  cxx = meson.get_compiler('cpp')
+@@ -158,7 +158,7 @@ if not sdbusplus.found()
+ endif
+ 
+ boost = dependency('boost',
+-                   modules: ['coroutine', 'iostreams', 'filesystem',
++                   modules: ['context', 'coroutine', 'iostreams', 'filesystem',
+ 			     'program_options', 'regex', 'system'],
+                    version: '>=1.77',
+                    fallback : ['boost', 'boost_dep'],
 diff --git a/src/state/activating_state.hpp b/src/state/activating_state.hpp
 index 8af413c..d9b8c53 100644
 --- a/src/state/activating_state.hpp
