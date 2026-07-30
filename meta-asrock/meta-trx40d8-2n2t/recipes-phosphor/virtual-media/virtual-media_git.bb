@@ -13,7 +13,6 @@ SRC_URI = " \
 SRCREV = "1306c2132bdb9d5ad6deb00cd8a1d920753f7ea7"
 
 PV = "0.1+git${SRCPV}"
-S = "${WORKDIR}/git"
 
 DEPENDS = " \
     boost \
