@@ -6,27 +6,32 @@ Subject: [PATCH] bmcweb: add AMI host inventory routes
 The TRX40 AMI firmware uploads inventory through a USB Redfish host
 interface. Register the compatibility routes, advertise the OEM resource,
 and allow the source-bound handlers to perform their own authentication.
+The source-bound routes also expose the exact inventory-extension identity
+already implemented natively by this board layer.
 
 The firmware's fallback credential is deliberately not a PAM account.
 
 Upstream-Status: Pending [board firmware compatibility]
 ---
- include/authentication.hpp             |  7 +++++++
+ include/authentication.hpp             | 10 ++++++++++
  redfish-core/lib/redfish_sessions.hpp  |  5 +++++
  redfish-core/lib/service_root.hpp       |  2 ++
  redfish-core/src/redfish.cpp            |  2 ++
- 4 files changed, 16 insertions(+)
+ 4 files changed, 19 insertions(+)
 
 diff --git a/include/authentication.hpp b/include/authentication.hpp
 index c71b5ec314..3371e42988 100644
 --- a/include/authentication.hpp
 +++ b/include/authentication.hpp
-@@ -222,6 +222,13 @@ inline bool isOnAllowlist(std::string_view url, boost::beast::http::verb method)
+@@ -222,6 +222,16 @@ inline bool isOnAllowlist(std::string_view url, boost::beast::http::verb method)
      {
          url.remove_suffix(1);
      }
 +    if ((url == "/redfish/v1/Oem/Ami/InventoryData") ||
-+        (url == "/redfish/v1/oem/ami/inventory/crc"))
++        (url == "/redfish/v1/oem/ami/inventory/crc") ||
++        (url == "/redfish/v1/DynamicExtension/RedfishExtensions") ||
++        (url == "/redfish/v1/DynamicExtension/RedfishExtensions/"
++                "34E46539-1213-4208-9AB6-2D1C21A35523"))
 +    {
 +        // These board-firmware compatibility routes perform their own source
 +        // and credential checks after the request reaches the route handler.

@@ -17,6 +17,24 @@ AMI RfInventory
 No host OS agent, Ubuntu service, SMBIOS conversion, or host filesystem is
 required. The BIOS is the data producer, just as it was with the original BMC.
 
+## Firmware startup gates
+
+`RedfishHi` locates `EFI_SIMPLE_NETWORK_PROTOCOL` and requires both
+`MediaPresentSupported` and `MediaPresent` before starting its Redfish client.
+The original BMC's `eth.ko` exposes USB identity `046b:ffb0`, device class
+`02/00/00`, manufacturer `American Megatrends Inc.`, product
+`Virtual Ethernet`, and serial `1234567890`. The ConfigFS gadget mirrors that
+identity so the board's AMI UEFI RNDIS driver can create the protocol before
+the host OS starts.
+
+`AmiRedfishDynExt` then checks the embedded inventory extension before enabling
+`RfInventory`. It requests
+`/redfish/v1/DynamicExtension/RedfishExtensions/34E46539-1213-4208-9AB6-2D1C21A35523`
+and compares JSON fields `Id` and `Md5Checksum` with the embedded raw file.
+Its MD5 is `24e5614de3ead58517b9a1f001f272a8`. bmcweb advertises the native
+OpenBMC receiver as that already-installed extension. It does not accept,
+extract, or execute the vendor Lua archive.
+
 ## Firmware protocol
 
 The implemented transaction follows the firmware:
@@ -63,9 +81,15 @@ from a management LAN interface.
 The endpoint paths, multipart names, category behavior, USB addresses, RNDIS
 transport, and firmware authentication modes are established from the vendor
 firmware. Parser unit tests cover full, sparse, empty, malformed, oversized,
-and round-trip updates. Hardware validation still requires booting a generated
-image and observing one BIOS upload, its D-Bus objects, and the resulting
-Redfish/WebUI CPU, DIMM, and PCIe resources.
+and round-trip updates. A live Linux test on the isolated USB interface reached
+`169.254.0.17`, completed an HTTPS request to bmcweb, and incremented the BMC's
+`usb0` counters. A transient run of the corrected gadget enumerated on Linux as
+`046b:ffb0 American Megatrends, Inc. Virtual Ethernet`, bound to `rndis_host`,
+and repeated the successful ping and HTTPS checks. The previously installed
+descriptor set did not receive any UEFI traffic during a full host boot.
+Hardware validation of the corrected AMI identity and DynamicExtension gate
+still requires booting a generated image and observing one BIOS upload, its
+D-Bus objects, and the resulting Redfish/WebUI CPU, DIMM, and PCIe resources.
 
 ## BIOS configuration lead: GPIO 219
 

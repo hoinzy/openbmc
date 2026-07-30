@@ -41,6 +41,13 @@ constexpr std::string_view amiInventoryPath =
     "/xyz/openbmc_project/inventory/ami_host";
 constexpr std::string_view amiInventoryInterface =
     "xyz.openbmc_project.AmiHostInventory";
+constexpr std::string_view amiInventoryExtensionId =
+    "34E46539-1213-4208-9AB6-2D1C21A35523";
+constexpr std::string_view amiInventoryExtensionMd5 =
+    "24e5614de3ead58517b9a1f001f272a8";
+constexpr std::string_view amiInventoryExtensionPath =
+    "/redfish/v1/DynamicExtension/RedfishExtensions/"
+    "34E46539-1213-4208-9AB6-2D1C21A35523";
 constexpr size_t amiInventoryLimit = 2 * 1024 * 1024;
 
 inline bool isAmiHost(const crow::Request& req)
@@ -412,6 +419,52 @@ inline void handleAmiCrcPost(
         std::string(amiInventoryInterface), "SetCrcs", *crcs);
 }
 
+inline void handleAmiExtensionCollectionGet(
+    const crow::Request& req,
+    const std::shared_ptr<bmcweb::AsyncResp>& asyncResp)
+{
+    if (!checkAmiHostCredentials(req))
+    {
+        rejectAmiHostRequest(req, asyncResp);
+        return;
+    }
+    asyncResp->res.jsonValue["@odata.id"] =
+        "/redfish/v1/DynamicExtension/RedfishExtensions";
+    asyncResp->res.jsonValue["@odata.type"] =
+        "#DynamicExtensionCollection.DynamicExtensionCollection";
+    asyncResp->res.jsonValue["Name"] = "Redfish Extension Collection";
+    asyncResp->res.jsonValue["Members"] =
+        nlohmann::json::array({{{"@odata.id", amiInventoryExtensionPath}}});
+    asyncResp->res.jsonValue["Members@odata.count"] = 1;
+}
+
+inline void handleAmiExtensionGet(
+    const crow::Request& req,
+    const std::shared_ptr<bmcweb::AsyncResp>& asyncResp)
+{
+    if (!checkAmiHostCredentials(req))
+    {
+        rejectAmiHostRequest(req, asyncResp);
+        return;
+    }
+
+    // AmiRedfishDynExt compares these two strings with the GUID and MD5 of the
+    // raw extension file embedded in the BIOS.  Advertising the native
+    // OpenBMC implementation as already installed avoids accepting or
+    // executing the vendor's uploaded Lua archive.
+    asyncResp->res.jsonValue["@odata.id"] = amiInventoryExtensionPath;
+    asyncResp->res.jsonValue["@odata.type"] =
+        "#DynamicExtension.v1_0_0.DynamicExtension";
+    asyncResp->res.jsonValue["Id"] = amiInventoryExtensionId;
+    asyncResp->res.jsonValue["Name"] = "AMI Inventory Extension";
+    asyncResp->res.jsonValue["Description"] =
+        "Native OpenBMC compatibility for AMI firmware inventory";
+    asyncResp->res.jsonValue["DirectoryName"] = "ami_inventory";
+    asyncResp->res.jsonValue["Md5Checksum"] = amiInventoryExtensionMd5;
+    asyncResp->res.jsonValue["Running"] = true;
+    asyncResp->res.jsonValue["PendingDeletion"] = false;
+}
+
 inline void requestRoutesAmiHostInventory(App& app)
 {
     BMCWEB_ROUTE(app, "/redfish/v1/Oem/Ami/InventoryData/")
@@ -429,6 +482,17 @@ inline void requestRoutesAmiHostInventory(App& app)
     BMCWEB_ROUTE(app, "/redfish/v1/oem/ami/inventory/crc/")
         .privileges({})
         .methods(boost::beast::http::verb::post)(handleAmiCrcPost);
+    BMCWEB_ROUTE(
+        app, "/redfish/v1/DynamicExtension/RedfishExtensions/")
+        .privileges({})
+        .methods(boost::beast::http::verb::get)(
+            handleAmiExtensionCollectionGet);
+    BMCWEB_ROUTE(
+        app,
+        "/redfish/v1/DynamicExtension/RedfishExtensions/"
+        "34E46539-1213-4208-9AB6-2D1C21A35523/")
+        .privileges({})
+        .methods(boost::beast::http::verb::get)(handleAmiExtensionGet);
 }
 
 } // namespace redfish

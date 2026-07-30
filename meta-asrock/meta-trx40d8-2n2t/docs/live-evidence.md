@@ -308,3 +308,37 @@ expected for the manager alone: a PLDM or IPMI/host-firmware BIOS provider must
 populate the table. The original vendor BIOS JSON/XML files are not an
 OpenBMC provider and are not copied into the image without a transport and
 attribute-semantic mapping.
+
+## AMI UEFI inventory boot trace
+
+During a complete host reboot, the installed OpenBMC image kept the dedicated
+USB gadget bound with carrier, but `usb0` received no packets and the AMI
+inventory D-Bus state remained empty. Linux later enumerated the gadget,
+accepted a temporary `169.254.0.18/16` address, reached `169.254.0.17`, and
+received HTTP 200 from both the Redfish service root and the AMI inventory
+endpoint. The BMC counters advanced during that isolated test. This separates
+a working USB/RNDIS/TCP/bmcweb path from a UEFI driver-start problem.
+
+Clean-room disassembly of `RedfishHi` shows that it refuses to initialize
+unless `EFI_SIMPLE_NETWORK_PROTOCOL.Mode` reports both
+`MediaPresentSupported` and `MediaPresent`. The original BMC's unstripped
+`eth.ko` creates a Communications-class USB device with VID:PID `046b:ffb0`
+and the strings `American Megatrends Inc.`, `Virtual Ethernet`, and
+`1234567890`; the installed OpenBMC image instead exposed `1d6b:0104` with
+miscellaneous-device class `ef/02/01`.
+
+The next image mirrors the original descriptor identity. It also satisfies the
+second firmware gate: `AmiRedfishDynExt` directly requests the embedded
+inventory extension GUID and compares `Id` plus its 32-character MD5 before it
+enables `RfInventory`. The raw BIOS extension has MD5
+`24e5614de3ead58517b9a1f001f272a8`. bmcweb returns that identity from a
+source-restricted native route, avoiding installation or execution of the
+vendor extension archive.
+
+The corrected ConfigFS script was also run transiently against the dedicated
+gadget while the host OS was online. Linux re-enumerated it as
+`046b:ffb0 American Megatrends, Inc. Virtual Ethernet`, reported device class
+`02/00/00`, and bound `rndis_host`. With a temporary `169.254.0.18/16` address,
+ping to `169.254.0.17` had no loss and HTTPS GETs of `/redfish/v1/` and the AMI
+inventory endpoint both returned HTTP 200. The address was removed and the
+host interface returned to down after the test.

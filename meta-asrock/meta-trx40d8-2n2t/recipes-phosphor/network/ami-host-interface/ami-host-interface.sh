@@ -46,22 +46,26 @@ fi
 
 mkdir -p "${gadget_path}"
 
-printf '%s' 0x1d6b > "${gadget_path}/idVendor"
-printf '%s' 0x0104 > "${gadget_path}/idProduct"
+# The AMI UEFI RNDIS driver creates EFI_SIMPLE_NETWORK_PROTOCOL only for the
+# identity exposed by the original BMC's eth.ko.  Keep these descriptors
+# compatible so RedfishHi observes MediaPresent and starts before the OS boots.
+printf '%s' 0x046b > "${gadget_path}/idVendor"
+printf '%s' 0xffb0 > "${gadget_path}/idProduct"
 printf '%s' 0x0100 > "${gadget_path}/bcdDevice"
 printf '%s' 0x0200 > "${gadget_path}/bcdUSB"
-printf '%s' 0xEF > "${gadget_path}/bDeviceClass"
-printf '%s' 0x02 > "${gadget_path}/bDeviceSubClass"
-printf '%s' 0x01 > "${gadget_path}/bDeviceProtocol"
+printf '%s' 0x02 > "${gadget_path}/bDeviceClass"
+printf '%s' 0x00 > "${gadget_path}/bDeviceSubClass"
+printf '%s' 0x00 > "${gadget_path}/bDeviceProtocol"
 
 mkdir -p "${gadget_path}/strings/0x409"
-printf '%s' OpenBMC > "${gadget_path}/strings/0x409/manufacturer"
-printf '%s' "AMI Redfish Host Interface" \
+printf '%s' "American Megatrends Inc." \
+    > "${gadget_path}/strings/0x409/manufacturer"
+printf '%s' "Virtual Ethernet" \
     > "${gadget_path}/strings/0x409/product"
-printf '%s' TRX40D8RHI0001 > "${gadget_path}/strings/0x409/serialnumber"
+printf '%s' 1234567890 > "${gadget_path}/strings/0x409/serialnumber"
 
 mkdir -p "${gadget_path}/configs/c.1/strings/0x409"
-printf '%s' "RNDIS host interface" \
+printf '%s' RNDIS \
     > "${gadget_path}/configs/c.1/strings/0x409/configuration"
 printf '%s' 250 > "${gadget_path}/configs/c.1/MaxPower"
 
