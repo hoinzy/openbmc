@@ -1,5 +1,7 @@
 [Unit]
 Description=AMI host firmware inventory
+Wants=xyz.openbmc_project.biosconfig_manager.service
+After=xyz.openbmc_project.biosconfig_manager.service
 After=dbus.service
 
 [Service]

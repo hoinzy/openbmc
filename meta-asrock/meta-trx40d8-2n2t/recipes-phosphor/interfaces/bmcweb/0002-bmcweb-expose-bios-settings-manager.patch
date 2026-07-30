@@ -1,0 +1,76 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: OpenBMC Builder <openbmc-builder@users.noreply.github.com>
+Date: Thu, 30 Jul 2026 00:00:00 +0200
+Subject: [PATCH] bmcweb: expose BIOS settings manager attributes
+
+Populate the standard Redfish BIOS resource from
+xyz.openbmc_project.BIOSConfig.Manager.  The AMI compatibility provider
+loads this table from the firmware registry, while the Settings resource
+uses PendingAttributes.
+
+AMI firmware names the singleton system "Self".  Route that alias to the
+firmware-compatible current-settings response because Crow otherwise
+selects bmcweb's generic parameterized BIOS route.
+
+Upstream-Status: Pending [bios-settings-mgr Redfish integration]
+---
+ redfish-core/lib/bios.hpp | 50 +++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 50 insertions(+)
+
+diff --git a/redfish-core/lib/bios.hpp b/redfish-core/lib/bios.hpp
+index ddbd77cc..adcbfff3 100644
+--- a/redfish-core/lib/bios.hpp
++++ b/redfish-core/lib/bios.hpp
+@@ -4,0 +5 @@
++#include "ami_host_inventory.hpp"
+@@ -34,0 +36,6 @@ inline void handleBiosServiceGet(
++    if (systemName == "Self")
++    {
++        handleAmiSystemBiosGet(req, asyncResp);
++        return;
++    }
++
+@@ -62,0 +70,43 @@ inline void handleBiosServiceGet(
++    asyncResp->res.jsonValue["@Redfish.Settings"]["SettingsObject"]
++                            ["@odata.id"] =
++        std::format("/redfish/v1/Systems/{}/Bios/Settings",
++                    BMCWEB_REDFISH_SYSTEM_URI_NAME);
++
++    dbus::utility::getProperty<BiosBaseTable>(
++        std::string(biosManagerService), std::string(biosManagerPath),
++        std::string(biosManagerInterface), "BaseBIOSTable",
++        [asyncResp](const boost::system::error_code& ec,
++                    const BiosBaseTable& baseTable) {
++            if (ec)
++            {
++                BMCWEB_LOG_ERROR("Failed to read BIOS BaseBIOSTable: {}", ec);
++                messages::internalError(asyncResp->res);
++                return;
++            }
++
++            nlohmann::json& attributes =
++                asyncResp->res.jsonValue["Attributes"];
++            attributes = nlohmann::json::object();
++            for (const auto& [name, entry] : baseTable)
++            {
++                attributes[name] =
++                    biosValueToJson(std::get<0>(entry), std::get<5>(entry));
++            }
++        });
++
++    dbus::utility::getProperty<std::string>(
++        std::string(amiInventoryService), std::string(amiInventoryPath),
++        std::string(amiInventoryInterface), "BiosRegistry",
++        [asyncResp](const boost::system::error_code& ec,
++                    const std::string& registry) {
++            if (ec)
++            {
++                BMCWEB_LOG_WARNING("Failed to read BIOS registry id: {}", ec);
++                return;
++            }
++            if (!registry.empty())
++            {
++                asyncResp->res.jsonValue["AttributeRegistry"] = registry;
++            }
++        });
++

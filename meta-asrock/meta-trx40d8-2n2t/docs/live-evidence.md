@@ -300,14 +300,30 @@ channel or enabling closed-loop fan control.
 
 ## BIOS configuration manager probe
 
-The updated image runs `biosconfig-manager` and exposes the standard
-`xyz.openbmc_project.BIOSConfig.Manager` object at
-`/xyz/openbmc_project/bios_config/manager`. Its `BaseBIOSTable` is empty,
-however, and Redfish therefore does not publish `Bios/Attributes`. This is
-expected for the manager alone: a PLDM or IPMI/host-firmware BIOS provider must
-populate the table. The original vendor BIOS JSON/XML files are not an
-OpenBMC provider and are not copied into the image without a transport and
-attribute-semantic mapping.
+The board image runs the upstream `biosconfig-manager` and exposes
+`xyz.openbmc_project.BIOSConfig.Manager` at
+`/xyz/openbmc_project/bios_config/manager`. AMI UEFI supplies the missing
+provider data over the same isolated RNDIS Redfish interface as inventory.
+The board receiver validates the firmware's attribute registry and current
+settings, converts all 122 registry entries to `BaseBIOSTable`, and preserves
+AMI's private current-only `MAPIDS` value outside the standard table.
+
+The live registry `BiosAttributeRegistryA2395.1.19.0` contains 102
+enumerations, 15 booleans, two integers, and three strings. Authenticated
+standard Redfish now reports all 122 current attributes at
+`/redfish/v1/Systems/system/Bios`, links its Settings object, and maps PATCHes
+to `PendingAttributes`. The compatibility endpoint
+`/redfish/v1/Systems/Self/Bios/SD` reads and clears the same pending table.
+AMI's uploaded setup application is available to authenticated BMC users at
+`/bios/`.
+
+On 2026-07-30, a no-value-change test staged
+`CHIPSET000="Onboard VGA"` through the standard Settings resource and rebooted
+the host. During UEFI, pending attributes changed from one to zero,
+`current-bios.json` was republished, and the daemon logged 122 attributes from
+the same registry. Ubuntu had not started, proving the setting exchange has no
+host OS dependency. The value remained `Onboard VGA`; changed-value behavior,
+default reset, and password operations remain unvalidated.
 
 ## AMI UEFI inventory boot trace
 

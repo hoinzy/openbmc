@@ -26,12 +26,15 @@ NCT6796 profile exposed `TSI0_TEMP` and `TSI1_TEMP` through hwmon, proving the
 transport and driver path. Which TSI channel is wired to TR1 still needs a
 controlled hardware correlation, so neither channel is named `TR1` yet.
 
-The BIOS AMI inventory protocol is received over its dedicated RNDIS Redfish
-host interface and published as standard OpenBMC CPU, DIMM, and PCI inventory.
-It does not require a host OS agent. See
+The BIOS AMI inventory and configuration protocols are received over the
+dedicated RNDIS Redfish host interface. Hardware is published as standard
+OpenBMC CPU, DIMM, and PCI inventory. The firmware's 122-entry BIOS attribute
+registry populates `bios-settings-mgr`; standard Redfish and the AMI-compatible
+setup page share its pending-settings table. Neither path requires a host OS
+agent. See
 [`docs/ami-inventory.md`](docs/ami-inventory.md) for the protocol boundary,
-BMC-local persistence, source-restricted authentication, the current validation
-limit, and the separate GPIO 219 lead for future BIOS configuration work.
+BMC-local persistence, source-restricted authentication, validation results,
+and the separate GPIO 219 SMI-mailbox lead.
 
 ## Safety state
 

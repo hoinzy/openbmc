@@ -22,6 +22,12 @@ inventory = static_library(
   dependencies: [nlohmann_json],
 )
 
+bios = static_library(
+  'ami-bios-parser',
+  'ami_bios.cpp',
+  dependencies: [nlohmann_json, sdbusplus],
+)
+
 executable(
   'ami-host-inventory',
   'ami_inventory_daemon.cpp',
@@ -33,7 +39,7 @@ executable(
     threads,
   ],
   install: true,
-  link_with: inventory,
+  link_with: [inventory, bios],
 )
 
 if get_option('tests').enabled()
@@ -45,4 +51,12 @@ if get_option('tests').enabled()
     link_with: inventory,
   )
   test('ami-host-inventory', test_executable)
+
+  test_bios_executable = executable(
+    'test-ami-bios',
+    'test_ami_bios.cpp',
+    dependencies: [gtest, nlohmann_json, sdbusplus],
+    link_with: bios,
+  )
+  test('ami-bios', test_bios_executable)
 endif

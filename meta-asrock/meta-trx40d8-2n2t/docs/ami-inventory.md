@@ -162,16 +162,59 @@ left `Pending=false` and `LastError=""`, preserved the same Redfish counts,
 and did not republish unchanged hardware objects. This validates the
 BIOS-to-BMC path without a host OS service.
 
-## BIOS configuration lead: GPIO 219
+## BIOS configuration
+
+`FirmwareConfigDrv` uses the same UEFI Redfish host interface for BIOS
+configuration. It uploads an AMI attribute registry and current settings,
+retrieves pending settings from `/redfish/v1/Systems/Self/Bios/SD`, applies
+them, deletes the pending document, and republishes current settings. The
+board receiver converts the registry to the standard
+`xyz.openbmc_project.BIOSConfig.Manager.BaseBIOSTable` instead of maintaining a
+second BMC-only settings database.
+
+The live `BiosAttributeRegistryA2395.1.19.0` registry has 122 attributes:
+102 enumerations, 15 booleans, two integers, and three strings. AMI's current
+document has one additional private `MAPIDS` field, which remains available to
+the firmware-compatible endpoint but is deliberately excluded from the
+standard table.
+
+The exposed resources are:
+
+- `/redfish/v1/Systems/system/Bios`: 122 current, registry-backed attributes
+  and a standard `@Redfish.Settings` link.
+- `/redfish/v1/Systems/system/Bios/Settings`: authenticated GET and PATCH of
+  `PendingAttributes`.
+- `/redfish/v1/Systems/Self/Bios` and `/SD`: AMI-compatible current and
+  pending documents restricted to the isolated firmware source or an
+  authenticated BMC session.
+- `/bios/`: AMI's uploaded setup HTML, JavaScript, CSS, and XML served only to
+  an authenticated BMC session.
+
+Parser tests include all five manager attribute types and the captured
+122-entry firmware registry. A live safe round trip staged the already-current
+`CHIPSET000="Onboard VGA"` value through the standard Settings resource,
+observed it through AMI `/SD`, and cleared it. A second test left that same
+value pending and rebooted the host. UEFI consumed and deleted the pending
+entry before Ubuntu started, republished `current-bios.json`, and left the
+standard table at 122 attributes with the same value. This proves that both API
+surfaces use `bios-settings-mgr` and that applying settings has no host OS
+dependency.
+
+No changed BIOS value has yet been applied. Factory-default reset and BIOS
+password actions are also not implemented. The uploaded `/bios/` assets and
+their API calls were checked over HTTPS, but a visual browser render remains a
+separate validation item.
+
+## Independent SMI mailbox lead: GPIO 219
 
 The vendor BMC's `libipmipdkcmds.so.6.1.0` contains a separate SMI mailbox
 behind OEM netfn `0x3a`, commands `0xc0` through `0xc5`. Command `0xc2`
 (SetSMIUser) stages a BMC request and pulses GPIO 219. BIOS/SMM retrieves that
 request through `0xc5` (GetSMIBIOS), returns its response through `0xc4`
 (SetSMIBIOS), and the BMC-side client reads it with `0xc3` (GetSMIUser);
-`0xc0` and `0xc1` expose mailbox status. This is a strong lead for future BIOS
-configuration support and is independent of the RfInventory upload implemented
-here.
+`0xc0` and `0xc1` expose mailbox status. This mechanism is independent of the
+validated Redfish BIOS-settings exchange and may cover operations not exposed
+by `FirmwareConfigDrv`.
 
 GPIO 219 has not been electrically or runtime validated under OpenBMC. Future
 work should first correlate its line name, polarity, ownership, and SMI timing

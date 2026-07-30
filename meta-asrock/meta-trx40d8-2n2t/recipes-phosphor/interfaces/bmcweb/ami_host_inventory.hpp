@@ -5,6 +5,7 @@
 #include "app.hpp"
 #include "async_resp.hpp"
 #include "dbus_singleton.hpp"
+#include "dbus_utility.hpp"
 #include "error_messages.hpp"
 #include "http_request.hpp"
 #include "logging.hpp"
@@ -13,11 +14,14 @@
 #include "utility.hpp"
 #include "utils/ip_utils.hpp"
 
+#include <xyz/openbmc_project/BIOSConfig/Manager/common.hpp>
+
 #include <boost/beast/http/field.hpp>
 #include <boost/beast/http/status.hpp>
 #include <boost/beast/http/verb.hpp>
 #include <boost/system/error_code.hpp>
 #include <nlohmann/json.hpp>
+#include <sdbusplus/asio/property.hpp>
 
 #include <array>
 #include <cstddef>
@@ -32,6 +36,7 @@
 #include <string_view>
 #include <tuple>
 #include <utility>
+#include <variant>
 
 namespace redfish
 {
@@ -50,6 +55,20 @@ constexpr std::string_view amiBiosStaticDirectory =
     "/var/lib/ami-host-inventory/bios-static";
 constexpr std::string_view amiBiosDataDirectory =
     "/var/lib/ami-host-inventory/bios";
+constexpr std::string_view biosManagerService =
+    "xyz.openbmc_project.BIOSConfigManager";
+constexpr std::string_view biosManagerPath =
+    "/xyz/openbmc_project/bios_config/manager";
+constexpr std::string_view biosManagerInterface =
+    "xyz.openbmc_project.BIOSConfig.Manager";
+
+using BiosManager =
+    sdbusplus::common::xyz::openbmc_project::bios_config::Manager;
+using BiosAttributeType = BiosManager::AttributeType;
+using BiosAttributeValue = std::variant<int64_t, std::string>;
+using BiosBaseTable = BiosManager::base_bios_table_t::value_type;
+using BiosPendingAttributes =
+    BiosManager::pending_attributes_t::value_type;
 
 inline std::optional<std::string> getAmiMultipartFilename(
     std::string_view disposition);
@@ -120,6 +139,13 @@ inline bool checkAmiHostCredentials(const crow::Request& req)
     const std::string expected =
         std::string(amiHostUser) + ":" + std::string(amiHostPassword);
     return bmcweb::constantTimeStringCompare(decoded, expected);
+}
+
+inline bool checkAmiBiosClient(const crow::Request& req)
+{
+    // Firmware uses AuthNone on the isolated point-to-point USB interface.
+    // Browser users must have an authenticated bmcweb session.
+    return checkAmiHostCredentials(req) || req.session != nullptr;
 }
 
 inline void rejectAmiHostRequest(
@@ -802,6 +828,68 @@ inline void handleAmiBiosStaticGet(
     asyncResp->res.jsonValue["Status"] = "Completed";
 }
 
+inline void handleAmiBiosWebFileGet(
+    const crow::Request& req,
+    const std::shared_ptr<bmcweb::AsyncResp>& asyncResp,
+    const std::string& filename)
+{
+    if (req.session == nullptr)
+    {
+        messages::insufficientPrivilege(asyncResp->res);
+        return;
+    }
+    if (!isAmiBiosStaticFilename(filename))
+    {
+        asyncResp->res.result(boost::beast::http::status::not_found);
+        return;
+    }
+
+    std::string_view contentType = "application/octet-stream";
+    const std::string extension =
+        std::filesystem::path(filename).extension().string();
+    if (extension == ".html")
+    {
+        contentType = "text/html;charset=UTF-8";
+    }
+    else if (extension == ".css")
+    {
+        contentType = "text/css;charset=UTF-8";
+    }
+    else if (extension == ".js")
+    {
+        contentType = "application/javascript;charset=UTF-8";
+    }
+    else if (extension == ".png")
+    {
+        contentType = "image/png";
+    }
+    else if (extension == ".ico")
+    {
+        contentType = "image/x-icon";
+    }
+    else if (extension == ".xml")
+    {
+        contentType = "application/xml";
+    }
+    asyncResp->res.addHeader(boost::beast::http::field::content_type,
+                             contentType);
+
+    bmcweb::CompressionType compression = bmcweb::CompressionType::Raw;
+    if (filename != "SetupData.xml")
+    {
+        asyncResp->res.addHeader(boost::beast::http::field::content_encoding,
+                                 "gzip");
+        compression = bmcweb::CompressionType::Gzip;
+    }
+    const std::filesystem::path path =
+        std::filesystem::path(amiBiosStaticDirectory) / filename;
+    if (asyncResp->res.openFile(path, bmcweb::EncodingType::Raw,
+                                compression) != crow::OpenCode::Success)
+    {
+        asyncResp->res.result(boost::beast::http::status::not_found);
+    }
+}
+
 inline bool isAmiBiosRegistryFilename(std::string_view filename)
 {
     return filename.starts_with("BiosAttributeRegistry") &&
@@ -843,18 +931,33 @@ inline void handleAmiBiosRegistryPost(
     {
         return;
     }
-    if (!persistAmiFile(amiBiosDataDirectory, filename, req.body()))
-    {
-        messages::internalError(asyncResp->res);
-        return;
-    }
-
-    const std::string location = "/redfish/v1/Registries/" + filename;
-    asyncResp->res.addHeader("Location", location);
-    asyncResp->res.result(boost::beast::http::status::created);
-    asyncResp->res.jsonValue["@odata.id"] = location;
-    asyncResp->res.jsonValue["Id"] = filename;
-    asyncResp->res.jsonValue["Name"] = "AMI BIOS attribute registry";
+    crow::connections::systemBus->async_method_call(
+        [asyncResp, filename](const boost::system::error_code& ec,
+                              const std::tuple<bool, std::string>& result) {
+            if (ec)
+            {
+                BMCWEB_LOG_ERROR("AMI BIOS registry storage failed: {}", ec);
+                messages::internalError(asyncResp->res);
+                return;
+            }
+            const auto& [stored, error] = result;
+            if (!stored)
+            {
+                amiBadRequest(asyncResp, error);
+                return;
+            }
+            const std::string location =
+                "/redfish/v1/Registries/" + filename;
+            asyncResp->res.addHeader("Location", location);
+            asyncResp->res.result(boost::beast::http::status::created);
+            asyncResp->res.jsonValue["@odata.id"] = location;
+            asyncResp->res.jsonValue["Id"] = filename;
+            asyncResp->res.jsonValue["Name"] =
+                "AMI BIOS attribute registry";
+        },
+        std::string(amiInventoryService), std::string(amiInventoryPath),
+        std::string(amiInventoryInterface), "StoreBiosRegistry", filename,
+        req.body());
 }
 
 inline nlohmann::json getAmiDefaultSd()
@@ -935,7 +1038,7 @@ inline void handleAmiSystemBiosGet(
     const crow::Request& req,
     const std::shared_ptr<bmcweb::AsyncResp>& asyncResp)
 {
-    if (!checkAmiHostCredentials(req))
+    if (!checkAmiBiosClient(req))
     {
         rejectAmiHostRequest(req, asyncResp);
         return;
@@ -957,12 +1060,233 @@ inline void handleAmiSystemBiosPost(
     {
         return;
     }
-    if (!persistAmiFile(amiBiosDataDirectory, "current-bios.json", req.body()))
+    crow::connections::systemBus->async_method_call(
+        [asyncResp, request = std::move(*request)](
+            const boost::system::error_code& ec,
+            const std::tuple<bool, std::string>& result) mutable {
+            if (ec)
+            {
+                BMCWEB_LOG_ERROR("AMI current BIOS storage failed: {}", ec);
+                messages::internalError(asyncResp->res);
+                return;
+            }
+            const auto& [stored, error] = result;
+            if (!stored)
+            {
+                amiBadRequest(asyncResp, error);
+                return;
+            }
+            asyncResp->res.jsonValue = std::move(request);
+        },
+        std::string(amiInventoryService), std::string(amiInventoryPath),
+        std::string(amiInventoryInterface), "StoreCurrentBios", req.body());
+}
+
+inline nlohmann::json biosValueToJson(BiosAttributeType type,
+                                      const BiosAttributeValue& value)
+{
+    if (type == BiosAttributeType::Boolean)
     {
-        messages::internalError(asyncResp->res);
+        const int64_t* boolean = std::get_if<int64_t>(&value);
+        return boolean != nullptr && *boolean != 0;
+    }
+    if (const int64_t* number = std::get_if<int64_t>(&value))
+    {
+        return *number;
+    }
+    return std::get<std::string>(value);
+}
+
+inline std::optional<BiosPendingAttributes> parseBiosPendingAttributes(
+    const nlohmann::json& request, const BiosBaseTable& baseTable,
+    const std::shared_ptr<bmcweb::AsyncResp>& asyncResp)
+{
+    const auto attributes = request.find("Attributes");
+    if (attributes == request.end() || !attributes->is_object() ||
+        attributes->empty())
+    {
+        amiBadRequest(asyncResp, "Expected a non-empty Attributes object");
+        return std::nullopt;
+    }
+
+    BiosPendingAttributes pending;
+    for (const auto& [name, value] : attributes->items())
+    {
+        const auto current = baseTable.find(name);
+        if (current == baseTable.end())
+        {
+            amiBadRequest(asyncResp, "Unknown BIOS attribute " + name);
+            return std::nullopt;
+        }
+        const BiosAttributeType type = std::get<0>(current->second);
+        if (std::get<1>(current->second))
+        {
+            amiBadRequest(asyncResp, "BIOS attribute is read-only: " + name);
+            return std::nullopt;
+        }
+
+        BiosAttributeValue converted;
+        if (type == BiosAttributeType::Boolean)
+        {
+            if (!value.is_boolean())
+            {
+                amiBadRequest(asyncResp,
+                              "BIOS boolean attribute has invalid value: " +
+                                  name);
+                return std::nullopt;
+            }
+            converted = static_cast<int64_t>(value.get<bool>());
+        }
+        else if (type == BiosAttributeType::Integer)
+        {
+            if (!value.is_number_integer() && !value.is_number_unsigned())
+            {
+                amiBadRequest(asyncResp,
+                              "BIOS integer attribute has invalid value: " +
+                                  name);
+                return std::nullopt;
+            }
+            if (value.is_number_unsigned() &&
+                value.get<uint64_t>() >
+                    static_cast<uint64_t>(
+                        std::numeric_limits<int64_t>::max()))
+            {
+                amiBadRequest(asyncResp,
+                              "BIOS integer attribute is out of range: " +
+                                  name);
+                return std::nullopt;
+            }
+            converted = value.get<int64_t>();
+        }
+        else
+        {
+            if (!value.is_string())
+            {
+                amiBadRequest(asyncResp,
+                              "BIOS string attribute has invalid value: " +
+                                  name);
+                return std::nullopt;
+            }
+            converted = value.get<std::string>();
+        }
+        pending.emplace(name, std::make_tuple(type, std::move(converted)));
+    }
+    return pending;
+}
+
+inline void handleAmiBiosSettingsGet(
+    const crow::Request& req,
+    const std::shared_ptr<bmcweb::AsyncResp>& asyncResp)
+{
+    if (!checkAmiBiosClient(req))
+    {
+        rejectAmiHostRequest(req, asyncResp);
         return;
     }
-    asyncResp->res.jsonValue = std::move(*request);
+    dbus::utility::getProperty<BiosPendingAttributes>(
+        std::string(biosManagerService), std::string(biosManagerPath),
+        std::string(biosManagerInterface), "PendingAttributes",
+        [asyncResp](const boost::system::error_code& ec,
+                    const BiosPendingAttributes& pending) {
+            if (ec)
+            {
+                BMCWEB_LOG_ERROR(
+                    "Failed to read BIOS PendingAttributes: {}", ec);
+                messages::internalError(asyncResp->res);
+                return;
+            }
+            asyncResp->res.jsonValue["@odata.id"] =
+                "/redfish/v1/Systems/Self/Bios/SD";
+            asyncResp->res.jsonValue["Id"] = "SD";
+            asyncResp->res.jsonValue["Name"] =
+                "BIOS Configuration Pending Settings";
+            nlohmann::json& attributes =
+                asyncResp->res.jsonValue["Attributes"];
+            attributes = nlohmann::json::object();
+            for (const auto& [name, entry] : pending)
+            {
+                attributes[name] =
+                    biosValueToJson(std::get<0>(entry), std::get<1>(entry));
+            }
+        });
+}
+
+inline void handleAmiBiosSettingsUpdate(
+    const crow::Request& req,
+    const std::shared_ptr<bmcweb::AsyncResp>& asyncResp)
+{
+    if (!checkAmiBiosClient(req))
+    {
+        rejectAmiHostRequest(req, asyncResp);
+        return;
+    }
+    std::optional<nlohmann::json> request = parseAmiJsonBody(req, asyncResp);
+    if (!request)
+    {
+        return;
+    }
+    dbus::utility::getProperty<BiosBaseTable>(
+        std::string(biosManagerService), std::string(biosManagerPath),
+        std::string(biosManagerInterface), "BaseBIOSTable",
+        [asyncResp, request = std::move(*request)](
+            const boost::system::error_code& ec,
+            const BiosBaseTable& baseTable) {
+            if (ec || baseTable.empty())
+            {
+                BMCWEB_LOG_ERROR("Failed to read BIOS BaseBIOSTable: {}", ec);
+                messages::internalError(asyncResp->res);
+                return;
+            }
+            std::optional<BiosPendingAttributes> pending =
+                parseBiosPendingAttributes(request, baseTable, asyncResp);
+            if (!pending)
+            {
+                return;
+            }
+            sdbusplus::asio::setProperty(
+                *crow::connections::systemBus,
+                std::string(biosManagerService),
+                std::string(biosManagerPath),
+                std::string(biosManagerInterface), "PendingAttributes",
+                *pending,
+                [asyncResp](const boost::system::error_code& setEc) {
+                    if (setEc)
+                    {
+                        BMCWEB_LOG_ERROR(
+                            "Failed to set BIOS PendingAttributes: {}",
+                            setEc);
+                        messages::internalError(asyncResp->res);
+                        return;
+                    }
+                    asyncResp->res.result(
+                        boost::beast::http::status::no_content);
+                });
+        });
+}
+
+inline void handleAmiBiosSettingsDelete(
+    const crow::Request& req,
+    const std::shared_ptr<bmcweb::AsyncResp>& asyncResp)
+{
+    if (!checkAmiBiosClient(req))
+    {
+        rejectAmiHostRequest(req, asyncResp);
+        return;
+    }
+    sdbusplus::asio::setProperty(
+        *crow::connections::systemBus, std::string(biosManagerService),
+        std::string(biosManagerPath), std::string(biosManagerInterface),
+        "PendingAttributes", BiosPendingAttributes{},
+        [asyncResp](const boost::system::error_code& ec) {
+            if (ec)
+            {
+                BMCWEB_LOG_ERROR("Failed to clear BIOS PendingAttributes: {}",
+                                 ec);
+                messages::internalError(asyncResp->res);
+                return;
+            }
+            asyncResp->res.result(boost::beast::http::status::no_content);
+        });
 }
 
 inline void requestRoutesAmiHostInventory(App& app)
@@ -1002,6 +1326,16 @@ inline void requestRoutesAmiHostInventory(App& app)
     BMCWEB_ROUTE(app, "/redfish/v1/BiosStaticFiles/<str>/")
         .privileges({})
         .methods(boost::beast::http::verb::get)(handleAmiBiosStaticGet);
+    BMCWEB_ROUTE(app, "/bios/")
+        .privileges({})
+        .methods(boost::beast::http::verb::get)(
+            [](const crow::Request& req,
+               const std::shared_ptr<bmcweb::AsyncResp>& asyncResp) {
+                handleAmiBiosWebFileGet(req, asyncResp, "Index.html");
+            });
+    BMCWEB_ROUTE(app, "/bios/<str>")
+        .privileges({})
+        .methods(boost::beast::http::verb::get)(handleAmiBiosWebFileGet);
     BMCWEB_ROUTE(app, "/redfish/v1/Registries/<str>/")
         .privileges({})
         .methods(boost::beast::http::verb::post)(handleAmiBiosRegistryPost);
@@ -1017,6 +1351,29 @@ inline void requestRoutesAmiHostInventory(App& app)
     BMCWEB_ROUTE(app, "/redfish/v1/Systems/Self/Bios/")
         .privileges({})
         .methods(boost::beast::http::verb::post)(handleAmiSystemBiosPost);
+    BMCWEB_ROUTE(app, "/redfish/v1/Systems/Self/Bios/")
+        .privileges({})
+        .methods(boost::beast::http::verb::patch)(handleAmiSystemBiosPost);
+    BMCWEB_ROUTE(app, "/redfish/v1/Systems/Self/Bios/SD/")
+        .privileges({})
+        .methods(boost::beast::http::verb::get)(
+            handleAmiBiosSettingsGet);
+    BMCWEB_ROUTE(app, "/redfish/v1/Systems/Self/Bios/SD/")
+        .privileges({})
+        .methods(boost::beast::http::verb::post)(
+            handleAmiBiosSettingsUpdate);
+    BMCWEB_ROUTE(app, "/redfish/v1/Systems/Self/Bios/SD/")
+        .privileges({})
+        .methods(boost::beast::http::verb::delete_)(
+            handleAmiBiosSettingsDelete);
+    BMCWEB_ROUTE(app, "/redfish/v1/Systems/system/Bios/Settings/")
+        .privileges({})
+        .methods(boost::beast::http::verb::get)(
+            handleAmiBiosSettingsGet);
+    BMCWEB_ROUTE(app, "/redfish/v1/Systems/system/Bios/Settings/")
+        .privileges({})
+        .methods(boost::beast::http::verb::patch)(
+            handleAmiBiosSettingsUpdate);
 }
 
 } // namespace redfish

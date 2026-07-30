@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include "ami_bios.hpp"
 #include "ami_inventory.hpp"
 
 #include <boost/asio/io_context.hpp>
@@ -10,6 +11,7 @@
 #include <phosphor-logging/lg2.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
+#include <sdbusplus/asio/property.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -52,7 +54,16 @@ constexpr std::string_view pcieInterface =
 const fs::path stateDirectory = "/var/lib/ami-host-inventory";
 const fs::path snapshotPath = stateDirectory / "inventory.json";
 const fs::path crcPath = stateDirectory / "crc.json";
+const fs::path biosDirectory = stateDirectory / "bios";
+const fs::path currentBiosPath = biosDirectory / "current-bios.json";
 constexpr size_t maxSnapshotSize = 2 * 1024 * 1024;
+constexpr size_t maxBiosSize = 2 * 1024 * 1024;
+constexpr std::string_view biosManagerService =
+    "xyz.openbmc_project.BIOSConfigManager";
+constexpr std::string_view biosManagerPath =
+    "/xyz/openbmc_project/bios_config/manager";
+constexpr std::string_view biosManagerInterface =
+    "xyz.openbmc_project.BIOSConfig.Manager";
 
 std::string sanitizePathComponent(std::string_view value, size_t index)
 {
@@ -398,8 +409,8 @@ class InventoryService
 {
   public:
     explicit InventoryService(
-        const std::shared_ptr<sdbusplus::asio::connection>& bus) :
-        objectServer(bus), publisher(objectServer)
+        const std::shared_ptr<sdbusplus::asio::connection>& busIn) :
+        bus(busIn), objectServer(bus), publisher(objectServer)
     {
         objectServer.add_manager("/xyz/openbmc_project/inventory");
         control = objectServer.add_interface(std::string(controlPath),
@@ -413,13 +424,26 @@ class InventoryService
             "SetCrcs", [this](const std::map<std::string, uint32_t>& values) {
                 return setCrcs(values);
             });
+        control->register_method(
+            "StoreBiosRegistry",
+            [this](const std::string& filename, const std::string& json) {
+                return storeBiosRegistry(filename, json);
+            });
+        control->register_method(
+            "StoreCurrentBios", [this](const std::string& json) {
+                return storeCurrentBios(json);
+            });
         control->register_property("Pending", pending);
         control->register_property("LastError", lastError);
+        control->register_property("BiosRegistry", biosRegistry);
+        control->register_property("BiosAttributeCount", biosAttributeCount);
         control->initialize();
         restore();
+        syncBiosConfig(false);
     }
 
   private:
+    std::shared_ptr<sdbusplus::asio::connection> bus;
     sdbusplus::asio::object_server objectServer;
     InventoryPublisher publisher;
     std::shared_ptr<sdbusplus::asio::dbus_interface> control;
@@ -431,6 +455,8 @@ class InventoryService
     bool inventoryPending = false;
     bool crcPending = false;
     std::string lastError;
+    std::string biosRegistry;
+    uint32_t biosAttributeCount = 0;
 
     std::tuple<bool, std::string> stage(const std::string& json)
     {
@@ -530,6 +556,184 @@ class InventoryService
         updatePending();
         setError({});
         return {true, {}};
+    }
+
+    static bool validRegistryFilename(std::string_view filename)
+    {
+        return filename.starts_with("BiosAttributeRegistry") &&
+               filename.ends_with(".json") &&
+               filename.find('/') == std::string_view::npos &&
+               filename.find('\\') == std::string_view::npos;
+    }
+
+    std::tuple<bool, std::string>
+        storeBiosRegistry(const std::string& filename, const std::string& json)
+    {
+        if (!validRegistryFilename(filename) || json.empty() ||
+            json.size() > maxBiosSize)
+        {
+            const std::string error = "invalid AMI BIOS registry upload";
+            setError(error);
+            return {false, error};
+        }
+        const nlohmann::json document =
+            nlohmann::json::parse(json, nullptr, false);
+        if (!document.is_object())
+        {
+            const std::string error = "AMI BIOS registry is not valid JSON";
+            setError(error);
+            return {false, error};
+        }
+        std::string error;
+        if (!writeAtomically(biosDirectory / filename, json, error))
+        {
+            setError(error);
+            return {false, error};
+        }
+        setError({});
+        if (!syncBiosConfig(false) && !lastError.empty())
+        {
+            return {false, lastError};
+        }
+        return {true, {}};
+    }
+
+    std::tuple<bool, std::string> storeCurrentBios(const std::string& json)
+    {
+        if (json.empty() || json.size() > maxBiosSize)
+        {
+            const std::string error = "invalid AMI current BIOS upload";
+            setError(error);
+            return {false, error};
+        }
+        const nlohmann::json document =
+            nlohmann::json::parse(json, nullptr, false);
+        if (!document.is_object() || !document.contains("Attributes") ||
+            !document["Attributes"].is_object())
+        {
+            const std::string error =
+                "AMI current BIOS settings is not valid JSON";
+            setError(error);
+            return {false, error};
+        }
+        std::string error;
+        if (!writeAtomically(currentBiosPath, json, error))
+        {
+            setError(error);
+            return {false, error};
+        }
+        setError({});
+        if (!syncBiosConfig(true) && !lastError.empty())
+        {
+            return {false, lastError};
+        }
+        return {true, {}};
+    }
+
+    bool loadBiosTable(ami::bios::BaseTable& table, std::string& registryId,
+                       std::string& error)
+    {
+        const std::string current =
+            readBounded(currentBiosPath, maxBiosSize);
+        if (current.empty())
+        {
+            error = "current AMI BIOS settings are not available";
+            return false;
+        }
+        const nlohmann::json document =
+            nlohmann::json::parse(current, nullptr, false);
+        const auto registry = document.find("AttributeRegistry");
+        if (!document.is_object() || registry == document.end() ||
+            !registry->is_string())
+        {
+            error = "current AMI BIOS settings has no AttributeRegistry";
+            return false;
+        }
+        registryId = registry->get<std::string>();
+        const std::string filename = registryId + ".json";
+        if (!validRegistryFilename(filename))
+        {
+            error = "current AMI BIOS settings has an invalid registry name";
+            return false;
+        }
+        const std::string registryJson =
+            readBounded(biosDirectory / filename, maxBiosSize);
+        if (registryJson.empty())
+        {
+            error = "referenced AMI BIOS registry is not available";
+            return false;
+        }
+        return ami::bios::parse(registryJson, current, table, registryId,
+                                error);
+    }
+
+    bool syncBiosConfig(bool force)
+    {
+        ami::bios::BaseTable table;
+        std::string registryId;
+        std::string error;
+        if (!loadBiosTable(table, registryId, error))
+        {
+            // Registry and current settings arrive as separate firmware
+            // requests. Their temporary absence is not an inventory failure.
+            if (error != "current AMI BIOS settings are not available" &&
+                error != "referenced AMI BIOS registry is not available")
+            {
+                setError(error);
+                lg2::error("Rejected AMI BIOS configuration: {ERROR}",
+                           "ERROR", error);
+            }
+            return false;
+        }
+
+        biosRegistry = registryId;
+        biosAttributeCount = static_cast<uint32_t>(table.size());
+        control->set_property("BiosRegistry", biosRegistry);
+        control->set_property("BiosAttributeCount", biosAttributeCount);
+
+        auto publish = [this, table = std::move(table),
+                        registryId = std::move(registryId),
+                        count = biosAttributeCount]() mutable {
+            sdbusplus::asio::setProperty(
+                *bus, std::string(biosManagerService),
+                std::string(biosManagerPath),
+                std::string(biosManagerInterface), "BaseBIOSTable", table,
+                [this, registryId = std::move(registryId),
+                 count](const boost::system::error_code& ec) {
+                    if (ec)
+                    {
+                        const std::string error =
+                            "failed to publish AMI BIOS settings: " +
+                            ec.message();
+                        setError(error);
+                        lg2::error("{ERROR}", "ERROR", error);
+                        return;
+                    }
+                    lg2::info(
+                        "Published AMI BIOS configuration: {ATTRIBUTES} "
+                        "attributes from {REGISTRY}",
+                        "ATTRIBUTES", count, "REGISTRY", registryId);
+                });
+        };
+
+        if (force)
+        {
+            publish();
+            return true;
+        }
+        sdbusplus::asio::getProperty<ami::bios::BaseTable>(
+            *bus, std::string(biosManagerService),
+            std::string(biosManagerPath), std::string(biosManagerInterface),
+            "BaseBIOSTable",
+            [publish = std::move(publish)](
+                const boost::system::error_code& ec,
+                const ami::bios::BaseTable& existing) mutable {
+                if (ec || existing.empty())
+                {
+                    publish();
+                }
+            });
+        return true;
     }
 
     void restore()

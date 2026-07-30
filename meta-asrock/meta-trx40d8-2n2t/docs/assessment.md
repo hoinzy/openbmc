@@ -64,6 +64,8 @@ assigned drivers.
 - open-loop full-duty startup for every declared PWM channel
 - AMI-compatible RNDIS host interface and source-restricted Redfish receiver
 - BIOS-supplied CPU, DIMM, and PCIe inventory with persistent CRC state
+- BIOS-supplied 122-entry attribute table backed by `bios-settings-mgr`, with
+  standard Redfish and AMI-compatible pending-settings resources
 
 The baseline first booted successfully from RAM and has since been installed
 and updated through the WebUI. The physical FRU selected the TRX40 Entity
@@ -116,6 +118,7 @@ host-on test, so the upstream X570D4U pinctrl description remains unchanged.
 | KVM/video | AST path negotiates 1024x768 with onboard VGA primary, but captures remain black | 2-5 days |
 | KVM/USB stability | first S0 KVM use correlated with BMC RAM-boot reset/fallback and host USB `-71`; UART reproduction required | 2-5 days |
 | Virtual media | WebSocket/NBD negotiation and AST mass-storage gadget pass in RAM after the board-layer jsnbd fix; host enumeration and sustained reads remain | 1-2 days |
+| BIOS configuration | UEFI registry/current upload and same-value pending-setting consumption pass without a host OS; validate a changed low-risk value, visual setup-page rendering, reset, and password operations | 1-3 days |
 | Redfish thermal/power surface | host/chassis power plus CPU/DIMM/PCIe inventory work; fan and PSU collections are empty and ThermalMetrics returns HTTP 500 | 1-3 days |
 | LEDs, intrusion, PROCHOT/THERMTRIP | GPIO mapping and policy required | 2-5 days |
 | Upstream-quality dedicated DTS and reviews | split kernel/entity-manager/openbmc changes | 1-3 weeks |
