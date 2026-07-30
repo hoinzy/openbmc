@@ -22,9 +22,11 @@ do_install() {
     install -m 0644 ${UNPACKDIR}/ami-host-interface.service \
         ${D}${systemd_system_unitdir}/
 
-    install -d ${D}${systemd_unitdir}/network
+    # Keep this in /etc so it takes precedence over generic network files and
+    # remains the authoritative configuration for the source-isolated link.
+    install -d ${D}${sysconfdir}/systemd/network
     install -m 0644 ${UNPACKDIR}/10-ami-usb0.network \
-        ${D}${systemd_unitdir}/network/
+        ${D}${sysconfdir}/systemd/network/00-bmc-usb0.network
 }
 
-FILES:${PN} += "${systemd_unitdir}/network/10-ami-usb0.network"
+FILES:${PN} += "${sysconfdir}/systemd/network/00-bmc-usb0.network"
