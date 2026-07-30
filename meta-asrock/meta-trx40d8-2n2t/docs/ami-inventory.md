@@ -86,10 +86,12 @@ and round-trip updates. A live Linux test on the isolated USB interface reached
 `usb0` counters. A transient run of the corrected gadget enumerated on Linux as
 `046b:ffb0 American Megatrends, Inc. Virtual Ethernet`, bound to `rndis_host`,
 and repeated the successful ping and HTTPS checks. The previously installed
-descriptor set did not receive any UEFI traffic during a full host boot.
-Hardware validation of the corrected AMI identity and DynamicExtension gate
-still requires booting a generated image and observing one BIOS upload, its
-D-Bus objects, and the resulting Redfish/WebUI CPU, DIMM, and PCIe resources.
+descriptor set did not receive any UEFI traffic during a full host boot. The
+installed corrected image also produced no UEFI Ethernet frames during a
+packet capture spanning a complete warm reboot. Hardware validation of the
+inventory publication now specifically requires resolving that pre-OS driver
+activation gate and then observing one BIOS upload, its D-Bus objects, and the
+resulting Redfish/WebUI CPU, DIMM, and PCIe resources.
 
 ## BIOS configuration lead: GPIO 219
 

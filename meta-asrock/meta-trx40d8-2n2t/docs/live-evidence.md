@@ -342,3 +342,24 @@ gadget while the host OS was online. Linux re-enumerated it as
 ping to `169.254.0.17` had no loss and HTTPS GETs of `/redfish/v1/` and the AMI
 inventory endpoint both returned HTTP 200. The address was removed and the
 host interface returned to down after the test.
+
+The generated image with that corrected identity was then installed and
+captured across a complete warm host reboot. A raw `AF_PACKET` recorder was
+started on BMC `usb0` before the reboot and stopped only after Linux returned.
+There were no Ethernet frames at all between the pre-reboot management
+session and Linux bringing up the RNDIS interface: no DHCP, ARP, IPv6
+discovery, TCP connection, or HTTPS request originated during UEFI execution.
+The first post-reboot frames were Linux multicast-listener messages followed
+by the explicit test address and SSH session. The resulting 13 KiB PCAP has
+SHA-256
+`124284dcf7d54f2f4ccc0c28cb6cd92dca43612fadfca0a16d8bbec508118198`.
+
+After that reboot, Linux again enumerated `046b:ffb0`, bound `rndis_host`, and
+reached both compatibility endpoints over `169.254.0.17`. The inventory
+daemon nevertheless reported `Pending=false`, an empty CRC map, and no error;
+no CPU, DIMM, or PCIe D-Bus objects were created. This rules out the corrected
+USB descriptor, BMC address, RNDIS data path, and native bmcweb routes as the
+remaining failure boundary. The next investigation must establish why the
+UEFI driver is not opening the network device at all, including its
+`EFI_SIMPLE_NETWORK_PROTOCOL` media-state gate and any BIOS setup policy that
+controls Redfish Host Interface or inventory publication.
