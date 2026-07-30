@@ -262,6 +262,41 @@ The first three checks passed in RAM. Host-side enumeration and sustained data
 transfer remain an open test item; do not treat gadget creation alone as proof
 that boot-from-virtual-media works.
 
+The board image also provides a server-side legacy slot for network-backed
+media. It uses `/dev/nbd1`, leaving `/dev/nbd0` available for the browser
+WebSocket path. In Operations → Virtual Media:
+
+1. Open **Configure Connection** for the server-backed slot.
+2. Enter an SMB share such as `smb://nas/install-images` or an NFS export such
+   as `nfs://nas/volume1/install-images`.
+3. Supply a username and password for SMB if required. NFS uses the export's
+   host permissions and does not accept these credentials.
+4. Select **Refresh image list**, choose an `.iso`, `.nrg`, `.img`, or `.ima`
+   file, save the connection, and start the device.
+
+The complete image URI remains editable for direct use, including
+`smb://nas/share/path/image.iso`, `nfs://nas/export/path/image.iso`, and HTTPS
+URLs. Share browsing is an OpenBMC OEM Redfish action because the standard
+VirtualMedia schema defines image attachment but not remote directory
+enumeration. The implementation mounts a share read-only for enumeration,
+rejects symlinks, returns only top-level regular image files, limits the result
+to 256 names, and passes credentials through a pipe rather than storing them.
+
+After installing a build with network media enabled, verify both modes:
+
+```sh
+curl -k -u root -s \
+  https://BMC/redfish/v1/Managers/bmc/VirtualMedia
+curl -k -u root -s \
+  https://BMC/redfish/v1/Managers/bmc/VirtualMedia/Slot_1
+```
+
+The collection must contain `Slot_1`, and the slot's `Actions.Oem` object must
+advertise `#OpenBMCVirtualMedia.ListImages`. A failed or unreachable share must
+leave `/dev/nbd1` and the USB gadget unbound. Successful SMB and NFS
+enumeration, host-side attachment, sustained reads, eject, and coexistence
+with the browser slot remain required deployment tests.
+
 ## Flash installation gate
 
 The OpenBMC `static.mtd` image is a complete 64 MiB replacement. It installs a

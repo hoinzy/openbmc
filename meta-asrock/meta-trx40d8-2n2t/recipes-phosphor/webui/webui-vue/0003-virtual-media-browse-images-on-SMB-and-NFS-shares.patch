@@ -1,0 +1,322 @@
+From 6b81e45aa87de98f6f173d6d890562b75d43c2e9 Mon Sep 17 00:00:00 2001
+From: Till Heinzerling <1684934+hoinzy@users.noreply.github.com>
+Date: Thu, 30 Jul 2026 23:52:19 +0200
+Subject: [PATCH] virtual-media: browse images on SMB and NFS shares
+
+Add a share URI workflow to legacy virtual media. The UI can refresh the supported top-level image list through the OpenBMC OEM action, select an image, and attach it through the standard InsertMedia action. Keep the complete image URI field available for direct use.
+
+Upstream-Status: Pending
+Signed-off-by: Till Heinzerling <1684934+hoinzy@users.noreply.github.com>
+---
+ src/locales/en-US.json                        |   8 +
+ .../modules/Operations/VirtualMediaStore.js   |  14 ++
+ .../VirtualMedia/ModalConfigureConnection.vue | 158 ++++++++++++++++--
+ .../Operations/VirtualMedia/VirtualMedia.vue  |  12 +-
+ 4 files changed, 174 insertions(+), 18 deletions(-)
+
+diff --git a/src/locales/en-US.json b/src/locales/en-US.json
+index b4e1df0..e960e7d 100644
+--- a/src/locales/en-US.json
++++ b/src/locales/en-US.json
+@@ -1057,7 +1057,15 @@
+         "virtualMediaSubTitleFirst": "Load image from web browser",
+         "virtualMediaSubTitleSecond": "Load image from external server",
+         "modal": {
++            "errorListingImages": "Unable to read the image list from this share.",
++            "image": "Image",
++            "imageUri": "Image URI",
++            "noImages": "No supported images were found in this share.",
+             "password": "Password",
++            "refreshImageList": "Refresh image list",
++            "selectImage": "Select an image",
++            "shareUri": "SMB or NFS share URI",
++            "shareUriHelp": "Enter a share URI to choose an ISO, NRG, IMG, or IMA file, or enter a complete image URI below.",
+             "serverUri": "External server URI",
+             "title": "Legacy mode configuration",
+             "username": "Username"
+diff --git a/src/store/modules/Operations/VirtualMediaStore.js b/src/store/modules/Operations/VirtualMediaStore.js
+index 5b36c22..bc4fcf2 100644
+--- a/src/store/modules/Operations/VirtualMediaStore.js
++++ b/src/store/modules/Operations/VirtualMediaStore.js
+@@ -118,6 +118,8 @@ const VirtualMediaStore = {
+               return {
+                 ...device,
+                 serverUri: '',
++                shareUri: '',
++                selectedImage: '',
+                 username: '',
+                 password: '',
+                 isRW: false,
+@@ -141,6 +143,18 @@ const VirtualMediaStore = {
+           throw new Error();
+         });
+     },
++    async listImages(_, { id, data }) {
++      return await api
++        .post(
++          `${await this.dispatch('global/getBmcPath')}/VirtualMedia/${id}/Actions/Oem/OpenBMCVirtualMedia.ListImages`,
++          data,
++        )
++        .then((response) => response.data.Images || [])
++        .catch((error) => {
++          console.log('List virtual media images:', error);
++          throw new Error();
++        });
++    },
+     async unmountImage(_, id) {
+       return await api
+         .post(
+diff --git a/src/views/Operations/VirtualMedia/ModalConfigureConnection.vue b/src/views/Operations/VirtualMedia/ModalConfigureConnection.vue
+index 8dddcc4..bbf8d21 100644
+--- a/src/views/Operations/VirtualMedia/ModalConfigureConnection.vue
++++ b/src/views/Operations/VirtualMedia/ModalConfigureConnection.vue
+@@ -12,22 +12,20 @@
+     </template>
+     <b-form>
+       <b-form-group
+-        :label="$t('pageVirtualMedia.modal.serverUri')"
+-        label-for="serverUri"
++        :label="$t('pageVirtualMedia.modal.shareUri')"
++        label-for="shareUri"
+       >
+         <b-form-input
+-          id="serverUri"
+-          v-model="form.serverUri"
++          id="shareUri"
++          v-model="form.shareUri"
+           type="text"
+-          :state="getValidationState(v$.form.serverUri)"
+-          data-test-id="configureConnection-input-serverUri"
+-          @input="v$.form.serverUri.$touch()"
++          placeholder="smb://server/share or nfs://server/export"
++          data-test-id="configureConnection-input-shareUri"
++          @input="onShareChanged"
+         />
+-        <b-form-invalid-feedback role="alert">
+-          <template v-if="v$.form.serverUri.required.$invalid">
+-            {{ $t('global.form.fieldRequired') }}
+-          </template>
+-        </b-form-invalid-feedback>
++        <b-form-text>
++          {{ $t('pageVirtualMedia.modal.shareUriHelp') }}
++        </b-form-text>
+       </b-form-group>
+       <b-form-group
+         :label="$t('pageVirtualMedia.modal.username')"
+@@ -53,6 +51,51 @@
+           data-test-id="configureConnection-input-password"
+         />
+       </b-form-group>
++      <b-button
++        class="mb-3"
++        variant="secondary"
++        :disabled="!form.shareUri || isListingImages"
++        data-test-id="configureConnection-button-listImages"
++        @click="listImages"
++      >
++        {{ $t('pageVirtualMedia.modal.refreshImageList') }}
++      </b-button>
++      <b-form-group
++        v-if="images.length > 0"
++        :label="$t('pageVirtualMedia.modal.image')"
++        label-for="selectedImage"
++      >
++        <b-form-select
++          id="selectedImage"
++          v-model="form.selectedImage"
++          :options="imageOptions"
++          data-test-id="configureConnection-select-image"
++        />
++      </b-form-group>
++      <div v-if="imageListEmpty" class="text-muted mb-3" role="status">
++        {{ $t('pageVirtualMedia.modal.noImages') }}
++      </div>
++      <div v-if="imageListError" class="invalid-feedback d-block mb-3">
++        {{ $t('pageVirtualMedia.modal.errorListingImages') }}
++      </div>
++      <b-form-group
++        :label="$t('pageVirtualMedia.modal.imageUri')"
++        label-for="serverUri"
++      >
++        <b-form-input
++          id="serverUri"
++          v-model="form.serverUri"
++          type="text"
++          :state="getValidationState(v$.form.serverUri)"
++          data-test-id="configureConnection-input-serverUri"
++          @input="v$.form.serverUri.$touch()"
++        />
++        <b-form-invalid-feedback role="alert">
++          <template v-if="v$.form.serverUri.required.$invalid">
++            {{ $t('global.form.fieldRequired') }}
++          </template>
++        </b-form-invalid-feedback>
++      </b-form-group>
+       <b-form-group>
+         <b-form-checkbox
+           v-model="form.isRW"
+@@ -101,11 +144,27 @@ export default {
+         serverUri: null,
+         username: null,
+         password: null,
++        shareUri: null,
++        selectedImage: null,
+         isRW: false,
+       },
++      images: [],
++      imageListEmpty: false,
++      imageListError: false,
++      isListingImages: false,
+     };
+   },
+   computed: {
++    imageOptions() {
++      return [
++        {
++          value: null,
++          text: this.$t('pageVirtualMedia.modal.selectImage'),
++          disabled: true,
++        },
++        ...this.images.map((image) => ({ value: image, text: image })),
++      ];
++    },
+     isModalVisible: {
+       get() {
+         return this.modelValue;
+@@ -120,6 +179,14 @@ export default {
+       if (value === null) return;
+       Object.assign(this.form, value);
+     },
++    'form.selectedImage': function (value) {
++      if (!value || !this.form.shareUri) return;
++      const shareUri = this.encodeShareUri(this.form.shareUri).replace(
++        /\/+$/,
++        '',
++      );
++      this.form.serverUri = `${shareUri}/${encodeURIComponent(value)}`;
++    },
+   },
+   validations() {
+     return {
+@@ -134,6 +201,9 @@ export default {
+     handleSubmit() {
+       this.v$.$touch();
+       if (this.v$.$invalid) return;
++      if (/^(smb|nfs):\/\//.test(this.form.serverUri)) {
++        this.form.serverUri = this.encodeShareUri(this.form.serverUri);
++      }
+       let connectionData = {};
+       Object.assign(connectionData, this.form);
+       this.$emit('ok', connectionData);
+@@ -144,6 +214,64 @@ export default {
+         Object.assign(this.form, this.connection);
+       }
+     },
++    encodeShareUri(value) {
++      const shareUri = value.trim();
++      const schemeEnd = shareUri.indexOf('://');
++      if (schemeEnd < 0) return shareUri;
++      const pathStart = shareUri.indexOf('/', schemeEnd + 3);
++      if (pathStart < 0) return shareUri;
++
++      const encodeSegment = (segment) => {
++        try {
++          return encodeURIComponent(decodeURIComponent(segment));
++        } catch {
++          return encodeURIComponent(segment);
++        }
++      };
++      const authority = shareUri.substring(0, pathStart);
++      const path = shareUri
++        .substring(pathStart)
++        .split('/')
++        .map(encodeSegment)
++        .join('/');
++      return authority + path;
++    },
++    listImages() {
++      this.imageListError = false;
++      this.imageListEmpty = false;
++      this.isListingImages = true;
++      const isNfs = this.form.shareUri
++        .trim()
++        .toLowerCase()
++        .startsWith('nfs://');
++      this.$store
++        .dispatch('virtualMedia/listImages', {
++          id: this.connection.id,
++          data: {
++            Share: this.encodeShareUri(this.form.shareUri),
++            UserName: isNfs ? '' : this.form.username || '',
++            Password: isNfs ? '' : this.form.password || '',
++          },
++        })
++        .then((images) => {
++          this.images = images;
++          this.imageListEmpty = images.length === 0;
++          this.form.selectedImage = null;
++        })
++        .catch(() => {
++          this.images = [];
++          this.imageListError = true;
++        })
++        .finally(() => {
++          this.isListingImages = false;
++        });
++    },
++    onShareChanged() {
++      this.images = [];
++      this.form.selectedImage = null;
++      this.imageListEmpty = false;
++      this.imageListError = false;
++    },
+     closeModal() {
+       this.$nextTick(() => {
+         this.$refs.modal.hide();
+@@ -153,7 +281,13 @@ export default {
+       this.form.serverUri = null;
+       this.form.username = null;
+       this.form.password = null;
++      this.form.shareUri = null;
++      this.form.selectedImage = null;
+       this.form.isRW = false;
++      this.images = [];
++      this.imageListEmpty = false;
++      this.imageListError = false;
++      this.isListingImages = false;
+       this.v$.$reset();
+     },
+     onOk(bvModalEvt) {
+diff --git a/src/views/Operations/VirtualMedia/VirtualMedia.vue b/src/views/Operations/VirtualMedia/VirtualMedia.vue
+index b1e413c..864b321 100644
+--- a/src/views/Operations/VirtualMedia/VirtualMedia.vue
++++ b/src/views/Operations/VirtualMedia/VirtualMedia.vue
+@@ -240,8 +240,11 @@ export default {
+     startLegacy(connectionData) {
+       var data = {};
+       data.Image = connectionData.serverUri;
+-      data.UserName = connectionData.username;
+-      data.Password = connectionData.password;
++      const isNfs = connectionData.serverUri
++        .toLowerCase()
++        .startsWith('nfs://');
++      data.UserName = isNfs ? '' : connectionData.username;
++      data.Password = isNfs ? '' : connectionData.password;
+       data.WriteProtected = !connectionData.isRW;
+       this.startLoader();
+       this.$store
+@@ -279,10 +282,7 @@ export default {
+         .finally(() => this.endLoader());
+     },
+     saveConnection(connectionData) {
+-      this.modalConfigureConnection.serverUri = connectionData.serverUri;
+-      this.modalConfigureConnection.username = connectionData.username;
+-      this.modalConfigureConnection.password = connectionData.password;
+-      this.modalConfigureConnection.isRW = connectionData.isRW;
++      Object.assign(this.modalConfigureConnection, connectionData);
+     },
+     configureConnection(connectionData) {
+       this.modalConfigureConnection = connectionData;
+-- 
+2.50.1 (Apple Git-155)
+

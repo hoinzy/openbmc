@@ -1,0 +1,267 @@
+From 955b642dd734b72ae797dc58d2c7d339631e0256 Mon Sep 17 00:00:00 2001
+From: Till Heinzerling <1684934+hoinzy@users.noreply.github.com>
+Date: Thu, 30 Jul 2026 23:51:36 +0200
+Subject: [PATCH] virtual-media: add OEM share image listing action
+
+Expose a Redfish OEM action for legacy virtual-media slots that lists supported image files on an SMB or NFS share. Validate the share URI, pass credentials through the existing pipe, and return only the filenames supplied by the virtual-media service.
+
+Upstream-Status: Pending
+Signed-off-by: Till Heinzerling <1684934+hoinzy@users.noreply.github.com>
+---
+ redfish-core/lib/virtual_media.hpp | 205 +++++++++++++++++++++++++++++
+ 1 file changed, 205 insertions(+)
+
+diff --git a/redfish-core/lib/virtual_media.hpp b/redfish-core/lib/virtual_media.hpp
+index 3c040903..726a3cfd 100644
+--- a/redfish-core/lib/virtual_media.hpp
++++ b/redfish-core/lib/virtual_media.hpp
+@@ -36,6 +36,7 @@
+ #include <string_view>
+ #include <utility>
+ #include <variant>
++#include <vector>
+ 
+ namespace redfish
+ {
+@@ -336,6 +337,11 @@ inline void afterGetVmData(
+                                 ["target"] = boost::urls::format(
+             "/redfish/v1/Managers/{}/VirtualMedia/{}/Actions/VirtualMedia.InsertMedia",
+             name, resName);
++        asyncResp->res.jsonValue["Actions"]["Oem"]
++                                ["#OpenBMCVirtualMedia.ListImages"]["target"] =
++            boost::urls::format(
++                "/redfish/v1/Managers/{}/VirtualMedia/{}/Actions/Oem/OpenBMCVirtualMedia.ListImages",
++                name, resName);
+     }
+ 
+     vmParseInterfaceObject(item.second, asyncResp);
+@@ -465,6 +471,13 @@ struct InsertMediaActionParams
+     std::optional<bool> inserted;
+ };
+ 
++struct ListImagesActionParams
++{
++    std::optional<std::string> share;
++    std::optional<std::string> userName;
++    std::optional<std::string> password;
++};
++
+ /**
+  * @brief Function transceives data with dbus directly.
+  *
+@@ -540,6 +553,119 @@ inline void doMountVmLegacy(const std::shared_ptr<bmcweb::AsyncResp>& asyncResp,
+         imageUrl, rw, unixFd);
+ }
+ 
++inline void doListVmImages(
++    const std::shared_ptr<bmcweb::AsyncResp>& asyncResp,
++    const std::string& service, const std::string& name,
++    std::string&& share, std::string&& userName, std::string&& password)
++{
++    constexpr std::string_view action = "OpenBMCVirtualMedia.ListImages";
++    if (userName.contains('\0'))
++    {
++        messages::actionParameterValueFormatError(asyncResp->res, userName,
++                                                  "UserName", action);
++        return;
++    }
++    constexpr uint64_t credentialLimit = 512;
++    if (userName.size() > credentialLimit)
++    {
++        messages::stringValueTooLong(asyncResp->res, userName,
++                                     credentialLimit);
++        return;
++    }
++    if (password.contains('\0'))
++    {
++        messages::actionParameterValueFormatError(asyncResp->res, password,
++                                                  "Password", action);
++        return;
++    }
++    if (password.size() > credentialLimit)
++    {
++        messages::stringValueTooLong(asyncResp->res, password,
++                                     credentialLimit);
++        return;
++    }
++
++    std::shared_ptr<CredentialsPipe> secretPipe =
++        std::make_shared<CredentialsPipe>(
++            crow::connections::systemBus->get_io_context());
++    int fd = secretPipe->releaseFd();
++    secretPipe->asyncWrite(
++        std::move(userName), std::move(password),
++        [asyncResp,
++         secretPipe](const boost::system::error_code& ec, std::size_t) {
++            if (ec)
++            {
++                BMCWEB_LOG_ERROR("Failed to pass secret: {}", ec);
++                messages::internalError(asyncResp->res);
++            }
++        });
++
++    sdbusplus::message::unix_fd unixFd(fd);
++    sdbusplus::object_path path("/xyz/openbmc_project/VirtualMedia/Legacy");
++    path /= name;
++    dbus::utility::async_method_call(
++        asyncResp,
++        [asyncResp](const boost::system::error_code& ec,
++                    const std::vector<std::string>& images) {
++            if (ec)
++            {
++                BMCWEB_LOG_ERROR("Unable to list virtual media images: {}", ec);
++                messages::internalError(asyncResp->res);
++                return;
++            }
++            asyncResp->res.jsonValue["Images"] = images;
++        },
++        service, path.str, "xyz.openbmc_project.VirtualMedia.Legacy",
++        "ListImages", share, unixFd);
++}
++
++inline void validateListImagesParams(
++    const std::shared_ptr<bmcweb::AsyncResp>& asyncResp,
++    const std::string& service, const std::string& resName,
++    ListImagesActionParams& actionParams)
++{
++    constexpr std::string_view action = "OpenBMCVirtualMedia.ListImages";
++    if (!actionParams.share || actionParams.share->empty())
++    {
++        messages::actionParameterValueFormatError(asyncResp->res, "<empty>",
++                                                  "Share", action);
++        return;
++    }
++
++    constexpr uint64_t shareLimit = 2048;
++    if (actionParams.share->size() > shareLimit)
++    {
++        messages::stringValueTooLong(asyncResp->res, *actionParams.share,
++                                     shareLimit);
++        return;
++    }
++
++    boost::system::result<boost::urls::url_view> url =
++        boost::urls::parse_uri(*actionParams.share);
++    if (!url || (url->scheme() != "smb" && url->scheme() != "nfs") ||
++        url->encoded_host().empty() || url->encoded_path().empty() ||
++        url->has_userinfo() || url->has_query() || url->has_fragment())
++    {
++        messages::actionParameterValueFormatError(
++            asyncResp->res, *actionParams.share, "Share", action);
++        return;
++    }
++
++    if (url->scheme() == "nfs" &&
++        ((!actionParams.userName.value_or("").empty()) ||
++         (!actionParams.password.value_or("").empty())))
++    {
++        messages::actionParameterNotSupported(asyncResp->res, "UserName",
++                                              action);
++        return;
++    }
++
++    doListVmImages(asyncResp, service, resName,
++                   std::move(*actionParams.share),
++                   std::move(actionParams.userName.value_or("")),
++                   std::move(actionParams.password.value_or("")));
++}
++
+ /**
+  * @brief Function validate parameters of insert media request.
+  *
+@@ -878,6 +1004,78 @@ inline void handleManagersVirtualMediaActionEject(
+         });
+ }
+ 
++inline void handleManagersVirtualMediaActionListImagesPost(
++    crow::App& app, const crow::Request& req,
++    const std::shared_ptr<bmcweb::AsyncResp>& asyncResp,
++    const std::string& managerName, const std::string& resName)
++{
++    if (!redfish::setUpRedfishRoute(app, req, asyncResp))
++    {
++        return;
++    }
++
++    constexpr std::string_view action = "OpenBMCVirtualMedia.ListImages";
++    if (managerName != "bmc")
++    {
++        messages::resourceNotFound(asyncResp->res, action, resName);
++        return;
++    }
++
++    ListImagesActionParams actionParams;
++    if (!json_util::readJsonAction(               //
++            req, asyncResp->res,                  //
++            "Password", actionParams.password,   //
++            "Share", actionParams.share,          //
++            "UserName", actionParams.userName     //
++            ))
++    {
++        return;
++    }
++
++    dbus::utility::getDbusObject(
++        "/xyz/openbmc_project/VirtualMedia", {},
++        // ast-grep-ignore: long-lambda
++        [asyncResp, action, actionParams,
++         resName](const boost::system::error_code& ec,
++                  const dbus::utility::MapperGetObject& getObjectType) mutable {
++            if (ec)
++            {
++                BMCWEB_LOG_ERROR("ObjectMapper::GetObject call failed: {}", ec);
++                messages::resourceNotFound(asyncResp->res, action, resName);
++                return;
++            }
++
++            std::string service = getObjectType.begin()->first;
++            sdbusplus::object_path path("/xyz/openbmc_project/VirtualMedia");
++            dbus::utility::getManagedObjects(
++                service, path,
++                // ast-grep-ignore: long-lambda
++                [service, resName, action, actionParams, asyncResp](
++                    const boost::system::error_code& ec2,
++                    const dbus::utility::ManagedObjectType& subtree) mutable {
++                    if (ec2)
++                    {
++                        messages::resourceNotFound(asyncResp->res, action,
++                                                   resName);
++                        return;
++                    }
++                    for (const auto& object : subtree)
++                    {
++                        VmMode mode =
++                            parseObjectPathAndGetMode(object.first, resName);
++                        if (mode == VmMode::Legacy)
++                        {
++                            validateListImagesParams(
++                                asyncResp, service, resName, actionParams);
++                            return;
++                        }
++                    }
++                    messages::resourceNotFound(asyncResp->res, "VirtualMedia",
++                                               resName);
++                });
++        });
++}
++
+ inline void handleManagersVirtualMediaCollectionGet(
+     crow::App& app, const crow::Request& req,
+     const std::shared_ptr<bmcweb::AsyncResp>& asyncResp,
+@@ -971,6 +1169,13 @@ inline void requestNBDVirtualMediaRoutes(App& app)
+         .methods(boost::beast::http::verb::post)(std::bind_front(
+             handleManagersVirtualMediaActionEject, std::ref(app)));
+ 
++    BMCWEB_ROUTE(
++        app,
++        "/redfish/v1/Managers/<str>/VirtualMedia/<str>/Actions/Oem/OpenBMCVirtualMedia.ListImages/")
++        .privileges(redfish::privileges::postVirtualMedia)
++        .methods(boost::beast::http::verb::post)(std::bind_front(
++            handleManagersVirtualMediaActionListImagesPost, std::ref(app)));
++
+     BMCWEB_ROUTE(app, "/redfish/v1/Managers/<str>/VirtualMedia/")
+         .privileges(redfish::privileges::getVirtualMediaCollection)
+         .methods(boost::beast::http::verb::get)(std::bind_front(
+-- 
+2.50.1 (Apple Git-155)
+

@@ -8,6 +8,7 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=e3fc50a88d0a364313df4b21ef20c29e"
 SRC_URI = " \
     git://github.com/Intel-BMC/virtual-media.git;branch=main;protocol=https \
     file://0001-virtual-media-add-NFS-image-support.patch \
+    file://0002-virtual-media-list-images-on-SMB-and-NFS-shares.patch \
     file://virtual-media.json \
     "
 SRCREV = "1306c2132bdb9d5ad6deb00cd8a1d920753f7ea7"

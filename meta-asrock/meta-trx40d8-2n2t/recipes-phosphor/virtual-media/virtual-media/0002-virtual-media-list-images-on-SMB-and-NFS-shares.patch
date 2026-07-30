@@ -1,0 +1,347 @@
+From e08a9adbec92d430b0346aa781fef04edab78445 Mon Sep 17 00:00:00 2001
+From: Till Heinzerling <1684934+hoinzy@users.noreply.github.com>
+Date: Thu, 30 Jul 2026 23:51:12 +0200
+Subject: [PATCH] virtual-media: list images on SMB and NFS shares
+
+Add a legacy D-Bus method that mounts a share read-only and returns supported top-level image files. Decode URI path components for selected filenames, retain credentials in the existing pipe flow, and reject NFS credentials.
+
+Upstream-Status: Pending
+Signed-off-by: Till Heinzerling <1684934+hoinzy@users.noreply.github.com>
+---
+ src/nfs.hpp                    |   3 +-
+ src/state/activating_state.cpp |  12 ++-
+ src/state/initial_state.hpp    | 165 ++++++++++++++++++++++++++++++++-
+ src/utils.hpp                  |  55 +++++++++++
+ 4 files changed, 227 insertions(+), 8 deletions(-)
+
+diff --git a/src/nfs.hpp b/src/nfs.hpp
+index b267f38..9176dc4 100644
+--- a/src/nfs.hpp
++++ b/src/nfs.hpp
+@@ -20,7 +20,8 @@ class NfsShare
+         const fs::path& remote, bool rw,
+         const std::unique_ptr<utils::CredentialsProvider>& credentials)
+     {
+-        if (credentials)
++        if (credentials &&
++            (!credentials->user().empty() || !credentials->password().empty()))
+         {
+             LogMsg(Logger::Error,
+                    "Credentials are not supported for NFS shares");
+diff --git a/src/state/activating_state.cpp b/src/state/activating_state.cpp
+index d226d90..95f32c7 100644
+--- a/src/state/activating_state.cpp
++++ b/src/state/activating_state.cpp
+@@ -363,8 +363,8 @@ bool ActivatingState::getImagePathFromUrl(const std::string& urlScheme,
+     {
+         if (imagePath != nullptr)
+         {
+-            *imagePath = imageUrl.substr(urlScheme.size() - 1);
+-            return true;
++            return utils::percentDecode(
++                imageUrl.substr(urlScheme.size() - 1), imagePath);
+         }
+ 
+         LogMsg(Logger::Error, "Invalid parameter provied");
+@@ -409,8 +409,12 @@ bool ActivatingState::getImagePathFromNfsUrl(const std::string& imageUrl,
+     {
+         return false;
+     }
+-    *imagePath = remote.substr(0, pathStart) + ":" +
+-                 remote.substr(pathStart);
++    std::string decodedPath;
++    if (!utils::percentDecode(remote.substr(pathStart), &decodedPath))
++    {
++        return false;
++    }
++    *imagePath = remote.substr(0, pathStart) + ":" + decodedPath;
+     return true;
+ }
+ 
+diff --git a/src/state/initial_state.hpp b/src/state/initial_state.hpp
+index f9255b0..b9e5d10 100644
+--- a/src/state/initial_state.hpp
++++ b/src/state/initial_state.hpp
+@@ -1,14 +1,21 @@
+ #include "active_state.hpp"
+ #include "basic_state.hpp"
+ #include "logger.hpp"
++#include "nfs.hpp"
+ #include "ready_state.hpp"
+ 
+ #include <sys/mount.h>
+ 
++#include <algorithm>
++#include <array>
++#include <cctype>
++#include <filesystem>
+ #include <memory>
+ #include <sdbusplus/asio/connection.hpp>
++#include <set>
+ #include <string>
+ #include <system_error>
++#include <vector>
+ 
+ struct InitialState : public BasicStateT<InitialState>
+ {
+@@ -195,6 +202,112 @@ struct InitialState : public BasicStateT<InitialState>
+         iface->initialize();
+     }
+ 
++    static std::vector<std::string> listImages(
++        interfaces::MountPointStateMachine& machine,
++        const std::string& shareUrl,
++        const std::unique_ptr<utils::CredentialsProvider>& credentials)
++    {
++        auto mountDir = std::make_unique<resource::Directory>(
++            std::string(machine.getName()) + "-browse");
++        const fs::path localPath = mountDir->getPath();
++        std::unique_ptr<resource::Mount> mountedShare;
++
++        if (shareUrl.starts_with("smb://"))
++        {
++            std::string remote;
++            if (!utils::percentDecode(
++                    shareUrl.substr(std::string("smb://").size() - 1),
++                    &remote))
++            {
++                throw resource::Error(std::errc::invalid_argument,
++                                      "Invalid SMB share URL");
++            }
++            SmbShare smb(localPath);
++            mountedShare = std::make_unique<resource::Mount>(
++                std::move(mountDir), smb, remote, false, credentials);
++        }
++        else if (shareUrl.starts_with("nfs://"))
++        {
++            const std::string remoteUrl =
++                shareUrl.substr(std::string("nfs://").size());
++            const auto pathStart = remoteUrl.find('/');
++            if (pathStart == std::string::npos || pathStart == 0)
++            {
++                throw resource::Error(std::errc::invalid_argument,
++                                      "Invalid NFS share URL");
++            }
++
++            std::string decodedPath;
++            if (!utils::percentDecode(remoteUrl.substr(pathStart),
++                                      &decodedPath))
++            {
++                throw resource::Error(std::errc::invalid_argument,
++                                      "Invalid NFS share URL");
++            }
++            const fs::path remote =
++                remoteUrl.substr(0, pathStart) + ":" + decodedPath;
++            NfsShare nfs(localPath);
++            mountedShare = std::make_unique<resource::Mount>(
++                std::move(mountDir), nfs, remote, false, credentials);
++        }
++        else
++        {
++            throw resource::Error(std::errc::protocol_not_supported,
++                                  "Unsupported share protocol");
++        }
++
++        static const std::set<std::string> extensions = {
++            ".ima", ".img", ".iso", ".nrg"};
++        std::vector<std::string> images;
++        std::error_code ec;
++        fs::directory_iterator iterator(localPath, ec);
++        if (ec)
++        {
++            throw resource::Error(std::errc::io_error,
++                                  "Unable to list remote share");
++        }
++
++        for (const auto& entry : iterator)
++        {
++            const bool isSymlink = entry.is_symlink(ec);
++            if (ec)
++            {
++                throw resource::Error(std::errc::io_error,
++                                      "Unable to inspect remote image");
++            }
++            const bool isRegular = entry.is_regular_file(ec);
++            if (ec)
++            {
++                throw resource::Error(std::errc::io_error,
++                                      "Unable to inspect remote image");
++            }
++            if (isSymlink || !isRegular)
++            {
++                continue;
++            }
++
++            std::string extension = entry.path().extension();
++            std::transform(extension.begin(), extension.end(),
++                           extension.begin(), [](unsigned char character) {
++                               return static_cast<char>(
++                                   std::tolower(character));
++                           });
++            if (!extensions.contains(extension))
++            {
++                continue;
++            }
++
++            images.emplace_back(entry.path().filename().string());
++            if (images.size() == 256)
++            {
++                break;
++            }
++        }
++
++        std::sort(images.begin(), images.end());
++        return images;
++    }
++
+     void addServiceInterface(const RegisterDbusEvent& event,
+                              const bool isLegacy)
+     {
+@@ -264,9 +377,12 @@ struct InitialState : public BasicStateT<InitialState>
+                         std::string pass(buf.begin() + user.length() + 1);
+ 
+                         // Encapsulate credentials into safe buffer
+-                        target.credentials =
+-                            std::make_unique<utils::CredentialsProvider>(
+-                                std::move(user), std::move(pass));
++                        if (!user.empty() || !pass.empty())
++                        {
++                            target.credentials =
++                                std::make_unique<utils::CredentialsProvider>(
++                                    std::move(user), std::move(pass));
++                        }
+ 
+                         // Cover the tracks
+                         utils::secureCleanup(buf);
+@@ -276,6 +392,49 @@ struct InitialState : public BasicStateT<InitialState>
+ 
+                     return true;
+                 });
++
++            iface->register_method(
++                "ListImages",
++                [&machine = machine](boost::asio::yield_context yield,
++                                     std::string shareUrl, optional_fd fd) {
++                    std::unique_ptr<utils::CredentialsProvider> credentials;
++                    if (std::holds_alternative<unix_fd>(fd))
++                    {
++                        boost::asio::posix::stream_descriptor secretPipe(
++                            machine.getIoc(), dup(std::get<unix_fd>(fd).fd));
++                        std::array<char, utils::secretLimit> buf{};
++                        const auto size = secretPipe.async_read_some(
++                            boost::asio::buffer(buf), yield);
++                        const auto nullCount =
++                            std::count(buf.begin(), buf.begin() + size, '\0');
++                        if (nullCount != 2)
++                        {
++                            throw sdbusplus::exception::SdBusError(
++                                EINVAL, "Malformed extra data");
++                        }
++
++                        std::string user(buf.begin());
++                        std::string pass(buf.begin() + user.length() + 1);
++                        if (!user.empty() || !pass.empty())
++                        {
++                            credentials =
++                                std::make_unique<utils::CredentialsProvider>(
++                                    std::move(user), std::move(pass));
++                        }
++                        utils::secureCleanup(buf);
++                    }
++
++                    try
++                    {
++                        return listImages(machine, shareUrl, credentials);
++                    }
++                    catch (const resource::Error& error)
++                    {
++                        throw sdbusplus::exception::SdBusError(
++                            std::make_error_code(error.errorCode).value(),
++                            error.what());
++                    }
++                });
+         }
+         else // proxy
+         {
+diff --git a/src/utils.hpp b/src/utils.hpp
+index 1c03aa0..c610e97 100644
+--- a/src/utils.hpp
++++ b/src/utils.hpp
+@@ -8,12 +8,14 @@
+ #include <boost/asio/steady_timer.hpp>
+ #include <boost/process/async_pipe.hpp>
+ #include <boost/type_traits/has_dereference.hpp>
++#include <cctype>
+ #include <filesystem>
+ #include <fstream>
+ #include <memory>
+ #include <optional>
+ #include <sdbusplus/asio/object_server.hpp>
+ #include <string>
++#include <string_view>
+ #include <system_error>
+ #include <vector>
+ 
+@@ -23,6 +25,59 @@ namespace utils
+ {
+ constexpr const size_t secretLimit = 1024;
+ 
++inline bool percentDecode(std::string_view encoded, std::string* decoded)
++{
++    if (decoded == nullptr)
++    {
++        return false;
++    }
++
++    auto hexValue = [](char character) -> int {
++        if (character >= '0' && character <= '9')
++        {
++            return character - '0';
++        }
++        character = static_cast<char>(
++            std::tolower(static_cast<unsigned char>(character)));
++        if (character >= 'a' && character <= 'f')
++        {
++            return character - 'a' + 10;
++        }
++        return -1;
++    };
++
++    decoded->clear();
++    decoded->reserve(encoded.size());
++    for (std::size_t index = 0; index < encoded.size(); ++index)
++    {
++        if (encoded[index] != '%')
++        {
++            decoded->push_back(encoded[index]);
++            continue;
++        }
++        if (index + 2 >= encoded.size())
++        {
++            return false;
++        }
++
++        const int high = hexValue(encoded[index + 1]);
++        const int low = hexValue(encoded[index + 2]);
++        if (high < 0 || low < 0)
++        {
++            return false;
++        }
++
++        const char decodedCharacter = static_cast<char>((high << 4) | low);
++        if (decodedCharacter == '\0')
++        {
++            return false;
++        }
++        decoded->push_back(decodedCharacter);
++        index += 2;
++    }
++    return true;
++}
++
+ template <typename T>
+ static void secureCleanup(T& value)
+ {
+-- 
+2.50.1 (Apple Git-155)
+
