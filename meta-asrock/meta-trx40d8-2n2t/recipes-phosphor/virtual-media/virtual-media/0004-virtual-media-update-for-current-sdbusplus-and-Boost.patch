@@ -1,0 +1,199 @@
+From 8b2fba23b0e5d7c4e9f7d26e3e34be543dbd1592 Mon Sep 17 00:00:00 2001
+From: Till Heinzerling <1684934+hoinzy@users.noreply.github.com>
+Date: Fri, 31 Jul 2026 00:06:35 +0200
+Subject: [PATCH] virtual-media: update for current sdbusplus and Boost.Asio
+
+Current sdbusplus headers require C++23 for std::move_only_function,
+while current Boost.Asio removed expires_from_now and defaults spawn to
+a deferred completion token. Build as C++23, use expires_after, and
+explicitly detach the long-running coroutines. Expose the CRTP event
+overload so current GCC does not reject the archived state classes with
+-Werror=overloaded-virtual.
+
+Upstream-Status: Pending
+Signed-off-by: Till Heinzerling <1684934+hoinzy@users.noreply.github.com>
+---
+ meson.build                      |  6 +++---
+ src/state/activating_state.hpp   |  2 ++
+ src/state/active_state.hpp       |  6 ++++--
+ src/state/deactivating_state.hpp |  2 ++
+ src/state/initial_state.hpp      |  2 ++
+ src/state/ready_state.hpp        |  2 ++
+ src/system.hpp                   | 11 ++++++-----
+ src/utils.hpp                    |  2 +-
+ 8 files changed, 22 insertions(+), 11 deletions(-)
+
+diff --git a/meson.build b/meson.build
+index ad24d31..3e41aaa 100644
+--- a/meson.build
++++ b/meson.build
+@@ -4,15 +4,15 @@ project(
+     default_options: [
+         'warning_level=3',
+         'werror=true',
+-        'cpp_std=c++20',
++        'cpp_std=c++23',
+         'cpp_rtti=false',
+     ],
+     license: 'Apache-2.0',
+     version: '0.1',
+ )
+ 
+-if get_option('cpp_std') != 'c++20'
+-    error('This project requires c++20 support')
++if get_option('cpp_std') != 'c++23'
++    error('This project requires c++23 support')
+ endif
+ 
+ cxx = meson.get_compiler('cpp')
+diff --git a/src/state/activating_state.hpp b/src/state/activating_state.hpp
+index 8af413c..d9b8c53 100644
+--- a/src/state/activating_state.hpp
++++ b/src/state/activating_state.hpp
+@@ -4,6 +4,8 @@
+ 
+ struct ActivatingState : public BasicStateT<ActivatingState>
+ {
++    using BasicStateT<ActivatingState>::handleEvent;
++
+     static std::string_view stateName()
+     {
+         return "ActivatingState";
+diff --git a/src/state/active_state.hpp b/src/state/active_state.hpp
+index beb1da1..55c047e 100644
+--- a/src/state/active_state.hpp
++++ b/src/state/active_state.hpp
+@@ -5,6 +5,8 @@
+ 
+ struct ActiveState : public BasicStateT<ActiveState>
+ {
++    using BasicStateT<ActiveState>::handleEvent;
++
+     static std::string_view stateName()
+     {
+         return "ActiveState";
+@@ -57,10 +59,10 @@ struct ActiveState : public BasicStateT<ActiveState>
+                     Configuration::inactivityTimeout - timeSinceLastAccess;
+             }
+ 
+-            timer.expires_from_now(std::chrono::seconds(1));
++            timer.expires_after(std::chrono::seconds(1));
+             timer.async_wait(handler);
+         };
+-        timer.expires_from_now(std::chrono::seconds(1));
++        timer.expires_after(std::chrono::seconds(1));
+         timer.async_wait(handler);
+ 
+         return nullptr;
+diff --git a/src/state/deactivating_state.hpp b/src/state/deactivating_state.hpp
+index 472b6f1..bd840a4 100644
+--- a/src/state/deactivating_state.hpp
++++ b/src/state/deactivating_state.hpp
+@@ -5,6 +5,8 @@
+ 
+ struct DeactivatingState : public BasicStateT<DeactivatingState>
+ {
++    using BasicStateT<DeactivatingState>::handleEvent;
++
+     static std::string_view stateName()
+     {
+         return "DeactivatingState";
+diff --git a/src/state/initial_state.hpp b/src/state/initial_state.hpp
+index b9e5d10..d0b89c8 100644
+--- a/src/state/initial_state.hpp
++++ b/src/state/initial_state.hpp
+@@ -19,6 +19,8 @@
+ 
+ struct InitialState : public BasicStateT<InitialState>
+ {
++    using BasicStateT<InitialState>::handleEvent;
++
+     static std::string_view stateName()
+     {
+         return "InitialState";
+diff --git a/src/state/ready_state.hpp b/src/state/ready_state.hpp
+index e20e700..29cf7a1 100644
+--- a/src/state/ready_state.hpp
++++ b/src/state/ready_state.hpp
+@@ -12,6 +12,8 @@
+ 
+ struct ReadyState : public BasicStateT<ReadyState>
+ {
++    using BasicStateT<ReadyState>::handleEvent;
++
+     static std::string_view stateName()
+     {
+         return "ReadyState";
+diff --git a/src/system.hpp b/src/system.hpp
+index f23e3d8..9839c36 100644
+--- a/src/system.hpp
++++ b/src/system.hpp
+@@ -4,6 +4,7 @@
+ 
+ #include <algorithm>
+ #include <boost/asio.hpp>
++#include <boost/asio/detached.hpp>
+ #include <boost/asio/spawn.hpp>
+ #include <boost/container/flat_map.hpp>
+ #include <boost/process/v1.hpp>
+@@ -316,7 +317,7 @@ class DeviceMonitor
+                     }
+                 }
+             }
+-        });
++        }, boost::asio::detached);
+     }
+ 
+     void addDevice(const NBDDevice& device)
+@@ -416,7 +417,7 @@ class Process : public std::enable_shared_from_this<Process>
+             while (child.running() && waitCnt > 0)
+             {
+                 boost::system::error_code ignored_ec;
+-                timer.expires_from_now(std::chrono::milliseconds(100));
++                timer.expires_after(std::chrono::milliseconds(100));
+                 timer.async_wait(yield[ignored_ec]);
+                 waitCnt--;
+             }
+@@ -431,7 +432,7 @@ class Process : public std::enable_shared_from_this<Process>
+                    " Native: ", child.native_exit_code());
+ 
+             onExit(child.exit_code());
+-        });
++        }, boost::asio::detached);
+         return true;
+     }
+ 
+@@ -450,7 +451,7 @@ class Process : public std::enable_shared_from_this<Process>
+             while (child.running() && waitCnt > 0)
+             {
+                 boost::system::error_code ignored_ec;
+-                timer.expires_from_now(std::chrono::milliseconds(100));
++                timer.expires_after(std::chrono::milliseconds(100));
+                 timer.async_wait(yield[ignored_ec]);
+                 waitCnt--;
+             }
+@@ -461,7 +462,7 @@ class Process : public std::enable_shared_from_this<Process>
+                 child.terminate();
+                 onTerminate();
+             }
+-        });
++        }, boost::asio::detached);
+     }
+ 
+     std::string application()
+diff --git a/src/utils.hpp b/src/utils.hpp
+index 46f0f61..0722475 100644
+--- a/src/utils.hpp
++++ b/src/utils.hpp
+@@ -389,7 +389,7 @@ class NotificationWrapper
+     {
+         LogMsg(Logger::Debug, "Notification initiated");
+         started = true;
+-        timer->expires_from_now(duration);
++        timer->expires_after(duration);
+         timer->async_wait([this, handler{std::move(handler)}](
+                               const boost::system::error_code& ec) {
+             started = false;
+-- 
+2.50.1 (Apple Git-155)
+

@@ -15,11 +15,11 @@ the existing resource owner during teardown.
 Upstream-Status: Pending
 Signed-off-by: Till Heinzerling <1684934+hoinzy@users.noreply.github.com>
 ---
- src/nfs.hpp                    | 61 +++++++++++++++++++++++++++++++++++++++++++
+ src/nfs.hpp                    | 62 ++++++++++++++++++++++++++++++++++++++++++++
  src/resources.hpp              |  8 +++---
  src/state/activating_state.cpp | 62 +++++++++++++++++++++++++++++++++++++++++--
  src/state/activating_state.hpp |  6 +++++
- 4 files changed, 132 insertions(+), 5 deletions(-)
+ 4 files changed, 133 insertions(+), 5 deletions(-)
  create mode 100644 src/nfs.hpp
 
 diff --git a/src/nfs.hpp b/src/nfs.hpp
@@ -27,7 +27,7 @@ new file mode 100644
 index 0000000..b5ad173
 --- /dev/null
 +++ b/src/nfs.hpp
-@@ -0,0 +1,61 @@
+@@ -0,0 +1,62 @@
 +#pragma once
 +
 +#include "logger.hpp"
