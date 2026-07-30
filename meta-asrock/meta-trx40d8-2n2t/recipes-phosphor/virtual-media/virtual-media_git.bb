@@ -31,8 +31,9 @@ RDEPENDS:${PN} = " \
 
 inherit meson pkgconfig systemd
 
+bindir = "${sbindir}"
+
 EXTRA_OEMESON = " \
-    -Dbindir=sbin \
     -Dlegacy-mode=enabled \
     -Dtests=disabled \
     "
