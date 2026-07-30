@@ -24,6 +24,10 @@ using nlohmann::json;
 json sampleInventory()
 {
     return {
+        {"GroupCrcList",
+         {{"DIMM", 2117671117U},
+          {"CPU", 3505128955U},
+          {"PCIE", 305144322U}}},
         {"Systems",
          json::array(
              {{{"Processors",
@@ -88,6 +92,7 @@ TEST(AmiInventory, ParsesFirmwareCategories)
     ASSERT_TRUE(update.cpus);
     ASSERT_TRUE(update.dimms);
     ASSERT_TRUE(update.pcieDevices);
+    ASSERT_TRUE(update.crcs);
     ASSERT_EQ(update.cpus->size(), size_t{1});
     ASSERT_EQ(update.dimms->size(), size_t{1});
     ASSERT_EQ(update.pcieDevices->size(), size_t{1});
@@ -100,6 +105,9 @@ TEST(AmiInventory, ParsesFirmwareCategories)
     EXPECT_EQ(update.pcieDevices->front().functions.front().vendorId, "0x10de");
     EXPECT_EQ(update.pcieDevices->front().functions.front().classCode,
               "0x030000");
+    EXPECT_EQ(update.crcs->at("DIMM"), 2117671117U);
+    EXPECT_EQ(update.crcs->at("CPU"), 3505128955U);
+    EXPECT_EQ(update.crcs->at("PCIE"), 305144322U);
 }
 
 TEST(AmiInventory, SparseUpdateRetainsOmittedCategories)
@@ -138,6 +146,26 @@ TEST(AmiInventory, PresentEmptyCategoryClearsCategory)
     EXPECT_FALSE(update.cpus);
 }
 
+TEST(AmiInventory, AcceptsCrcOnlySparseUpdate)
+{
+    const json inventory = {
+        {"GroupCrcList", {{"DIMM", 1}, {"CPU", 2}, {"PCIE", 3}}},
+        {"Systems", json::array({{{"Id", "Self"}}})},
+        {"Chassis", json::array({{{"Id", "Self"}}})}};
+    Update update;
+    std::string error;
+    ASSERT_TRUE(
+        ami::inventory::parseUpdate(inventory.dump(), update, error))
+        << error;
+    EXPECT_FALSE(update.cpus);
+    EXPECT_FALSE(update.dimms);
+    EXPECT_FALSE(update.pcieDevices);
+    ASSERT_TRUE(update.crcs);
+    EXPECT_EQ(update.crcs->at("DIMM"), 1U);
+    EXPECT_EQ(update.crcs->at("CPU"), 2U);
+    EXPECT_EQ(update.crcs->at("PCIE"), 3U);
+}
+
 TEST(AmiInventory, PreservesAbsentSlotsAndMultiplePcieFunctions)
 {
     const json inventory = {
@@ -163,6 +191,58 @@ TEST(AmiInventory, PreservesAbsentSlotsAndMultiplePcieFunctions)
     EXPECT_FALSE(update.dimms->front().present);
     ASSERT_EQ(update.pcieDevices->front().functions.size(), size_t{2});
     EXPECT_EQ(update.pcieDevices->front().functions[1].deviceId, "0x100f");
+}
+
+TEST(AmiInventory, UsesDetailedPcieInventoryAndSkipsAbsentAggregate)
+{
+    json inventory;
+    inventory["Systems"] =
+        json::array({{{"PCIeDevices",
+                       json::array(
+                           {{{"@odata.id",
+                              "/redfish/v1/Chassis/Self/PCIeDevices/GPU0"}}})}}});
+
+    json absent = {{"Id", "00_00_00"},
+                   {"Status", {{"State", "Absent"}}},
+                   {"Links", {{"PCIeFunctions", json::array()}}}};
+    for (size_t index = 0; index < 9; ++index)
+    {
+        absent["Links"]["PCIeFunctions"].emplace_back(
+            json{{"Id", index}, {"Status", {{"State", "Absent"}}}});
+    }
+    json gpu = {
+        {"Id", "GPU0"},
+        {"Description", "GPU slot"},
+        {"Status", {{"State", "Enabled"}}},
+        {"PCIeInterface",
+         {{"PCIeType", "Gen4"},
+          {"MaxPCIeType", "Gen4"},
+          {"MaxLanes", 16},
+          {"LanesInUse", 16}}},
+        {"Links",
+         {{"PCIeFunctions",
+           json::array({{{"Id", "0"},
+                         {"VendorId", "10de"},
+                         {"DeviceId", "1e07"}}})}}}};
+    inventory["Chassis"] =
+        json::array({{{"Links",
+                       {{"PCIeDevices",
+                         json::array({std::move(absent), std::move(gpu)})}}}}});
+
+    Update update;
+    std::string error;
+    ASSERT_TRUE(
+        ami::inventory::parseUpdate(inventory.dump(), update, error))
+        << error;
+    ASSERT_TRUE(update.pcieDevices);
+    ASSERT_EQ(update.pcieDevices->size(), size_t{1});
+    const auto& device = update.pcieDevices->front();
+    EXPECT_EQ(device.id, "GPU0");
+    EXPECT_EQ(device.location, "GPU slot");
+    EXPECT_EQ(device.pcieType, "Gen4");
+    EXPECT_EQ(device.maxLanes, 16);
+    ASSERT_EQ(device.functions.size(), size_t{1});
+    EXPECT_EQ(device.functions.front().deviceId, "0x1e07");
 }
 
 TEST(AmiInventory, SnapshotRoundTrip)
@@ -196,6 +276,10 @@ TEST(AmiInventory, RejectsMalformedAndUnsupportedJson)
     EXPECT_FALSE(
         ami::inventory::parseUpdate(R"({"Systems":[]})", update, error));
     EXPECT_FALSE(ami::inventory::parseUpdate(R"({"CPU":[42]})", update, error));
+    EXPECT_FALSE(ami::inventory::parseUpdate(
+        R"({"CPU":[],"GroupCrcList":{"CPU":-1}})", update, error));
+    EXPECT_FALSE(ami::inventory::parseUpdate(
+        R"({"CPU":[],"GroupCrcList":{"Storage":1}})", update, error));
 }
 
 TEST(AmiInventory, RejectsOversizedInputAndCategory)

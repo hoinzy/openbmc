@@ -134,6 +134,12 @@ bool getPresent(const Json& object)
     return true;
 }
 
+bool isOdataLink(const Json& value)
+{
+    return value.is_object() && value.size() == 1 &&
+           value.contains("@odata.id");
+}
+
 std::string normalizeHex(const Json& object,
                          std::initializer_list<std::string_view> names,
                          size_t width)
@@ -312,11 +318,17 @@ bool appendPcie(const Json& value, size_t index,
         error = "PCIe inventory entry is not an object";
         return false;
     }
+    // The Systems resource contains a PCIeDevices array of links in addition
+    // to the complete devices under Chassis.Links.  Only decode the latter.
+    if (isOdataLink(value))
+    {
+        return true;
+    }
 
     PcieDevice device;
     device.id = makeId(value, "PCIe", index);
     device.name = getString(value, {"Name", "Description"});
-    device.location = getString(value, {"Location", "Slot"});
+    device.location = getString(value, {"Location", "Slot", "Description"});
     device.manufacturer = getString(value, {"Manufacturer"});
     device.model = getString(value, {"Model"});
     device.pcieType = getString(value, {"PCIeType"});
@@ -324,6 +336,16 @@ bool appendPcie(const Json& value, size_t index,
     device.maxLanes = getUnsigned<uint16_t>(value, {"MaxLanes"});
     device.lanesInUse = getUnsigned<uint16_t>(value, {"LanesInUse"});
     device.present = getPresent(value);
+
+    auto pcieInterface = value.find("PCIeInterface");
+    if (pcieInterface != value.end() && pcieInterface->is_object())
+    {
+        device.pcieType = getString(*pcieInterface, {"PCIeType"});
+        device.maxPcieType = getString(*pcieInterface, {"MaxPCIeType"});
+        device.maxLanes = getUnsigned<uint16_t>(*pcieInterface, {"MaxLanes"});
+        device.lanesInUse =
+            getUnsigned<uint16_t>(*pcieInterface, {"LanesInUse"});
+    }
 
     std::vector<const Json*> arrays;
     if (!findArrays(value, {"PCIeFunctions", "PCIEFunctions"}, arrays, 0,
@@ -336,6 +358,13 @@ bool appendPcie(const Json& value, size_t index,
     {
         if (device.functions.size() + array->size() > maxFunctionsPerPcieDevice)
         {
+            // AMI groups unresolved slot records in one absent 00_00_00
+            // placeholder.  It is not a valid PCI multi-function device and
+            // must not become an OpenBMC inventory object.
+            if (!device.present)
+            {
+                return true;
+            }
             error = "PCIe device contains more than eight functions";
             return false;
         }
@@ -492,9 +521,36 @@ bool parseUpdate(std::string_view payload, Update& result, std::string& error)
     {
         return false;
     }
-    if (!result.cpus && !result.dimms && !result.pcieDevices)
+
+    auto groupCrcList = document.find("GroupCrcList");
+    if (groupCrcList != document.end())
     {
-        error = "AMI inventory JSON contains no supported category";
+        if (!groupCrcList->is_object())
+        {
+            error = "AMI inventory GroupCrcList is not an object";
+            return false;
+        }
+        result.crcs.emplace();
+        for (const auto& [name, value] : groupCrcList->items())
+        {
+            if ((name != "CPU" && name != "DIMM" && name != "PCIE") ||
+                !value.is_number_unsigned())
+            {
+                error = "AMI inventory GroupCrcList is invalid";
+                return false;
+            }
+            const uint64_t number = value.get<uint64_t>();
+            if (number > std::numeric_limits<uint32_t>::max())
+            {
+                error = "AMI inventory GroupCrcList is invalid";
+                return false;
+            }
+            result.crcs->emplace(name, static_cast<uint32_t>(number));
+        }
+    }
+    if (!result.cpus && !result.dimms && !result.pcieDevices && !result.crcs)
+    {
+        error = "AMI inventory JSON contains no supported data";
         return false;
     }
     return true;

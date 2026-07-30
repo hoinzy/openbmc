@@ -401,6 +401,7 @@ class InventoryService
         const std::shared_ptr<sdbusplus::asio::connection>& bus) :
         objectServer(bus), publisher(objectServer)
     {
+        objectServer.add_manager("/xyz/openbmc_project/inventory");
         control = objectServer.add_interface(std::string(controlPath),
                                              std::string(controlInterface));
         control->register_method("Stage", [this](const std::string& json) {
@@ -441,12 +442,22 @@ class InventoryService
             lg2::error("Rejected AMI host inventory: {ERROR}", "ERROR", error);
             return {false, error};
         }
-        if (!inventoryPending)
+        const bool hasInventoryUpdate =
+            update.cpus || update.dimms || update.pcieDevices;
+        if (hasInventoryUpdate && !inventoryPending)
         {
             staged = committed;
         }
-        ami::inventory::merge(staged, std::move(update));
-        inventoryPending = true;
+        if (update.crcs)
+        {
+            stagedCrcs = std::move(*update.crcs);
+            crcPending = true;
+        }
+        if (hasInventoryUpdate)
+        {
+            ami::inventory::merge(staged, std::move(update));
+            inventoryPending = true;
+        }
         updatePending();
         setError({});
         return {true, {}};
@@ -504,8 +515,18 @@ class InventoryService
     std::tuple<bool, std::string> setCrcs(
         const std::map<std::string, uint32_t>& values)
     {
-        stagedCrcs = values;
-        crcPending = true;
+        std::string error;
+        const nlohmann::json document = values;
+        if (!writeAtomically(crcPath, document.dump(2), error))
+        {
+            setError(error);
+            lg2::error("Failed to persist AMI host CRC state: {ERROR}",
+                       "ERROR", error);
+            return {false, error};
+        }
+        crcs = values;
+        stagedCrcs = crcs;
+        crcPending = false;
         updatePending();
         setError({});
         return {true, {}};

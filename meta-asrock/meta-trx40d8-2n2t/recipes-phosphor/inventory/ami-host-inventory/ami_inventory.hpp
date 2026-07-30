@@ -6,6 +6,7 @@
 #pragma once
 
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -90,11 +91,14 @@ struct Update
     std::optional<std::vector<Cpu>> cpus;
     std::optional<std::vector<Dimm>> dimms;
     std::optional<std::vector<PcieDevice>> pcieDevices;
+    std::optional<std::map<std::string, uint32_t>> crcs;
 };
 
 /**
  * Parse one JSON document emitted by AMI RfInventory. Categories not present
  * in the document remain disengaged so callers can retain the previous data.
+ * Group CRCs are optional and may be the only supported data in a sparse boot
+ * update.
  */
 bool parseUpdate(std::string_view payload, Update& result, std::string& error);
 
