@@ -5,6 +5,11 @@ SRC_URI:append:trx40d8-2n2t = " \
     file://ami_host_inventory.hpp \
     "
 
+# AMI RedfishHi uses TLS 1.2 and cannot negotiate bmcweb's default TLS 1.3-only
+# profile. Keep TLS 1.3 while enabling the Mozilla intermediate TLS 1.2 cipher
+# set on this firmware-facing board.
+EXTRA_OEMESON:append:trx40d8-2n2t = " -Dtls-profile=intermediate"
+
 do_configure:prepend:trx40d8-2n2t() {
     install -m 0644 ${UNPACKDIR}/ami_host_inventory.hpp \
         ${S}/redfish-core/lib/ami_host_inventory.hpp

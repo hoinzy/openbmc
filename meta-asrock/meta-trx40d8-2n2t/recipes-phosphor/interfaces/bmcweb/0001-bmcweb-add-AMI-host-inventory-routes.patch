@@ -13,25 +13,93 @@ The firmware's fallback credential is deliberately not a PAM account.
 
 Upstream-Status: Pending [board firmware compatibility]
 ---
- include/authentication.hpp             | 10 ++++++++++
+ http/http_connection.hpp               |  8 ++++++++
+ include/authentication.hpp             | 50 ++++++++++++++++++++++++++++++++++++++++++++++++
  redfish-core/lib/redfish_sessions.hpp  |  5 +++++
  redfish-core/lib/service_root.hpp       |  2 ++
  redfish-core/src/redfish.cpp            |  2 ++
- 4 files changed, 19 insertions(+)
+ 5 files changed, 67 insertions(+)
 
+diff --git a/http/http_connection.hpp b/http/http_connection.hpp
+index f047fa1777..86ea4f7326 100644
+--- a/http/http_connection.hpp
++++ b/http/http_connection.hpp
+@@ -548,6 +548,14 @@ class Connection :
+         {
+             if (userSession == nullptr)
+             {
++                const auto& request = parser->get();
++                const std::string_view target{
++                    request.target().data(), request.target().size()};
++                if (authentication::isAmiHostUpload(
++                        ip, target, request.method()))
++                {
++                    return httpReqBodyLimit;
++                }
+                 return loggedOutPostBodyLimit;
+             }
+         }
 diff --git a/include/authentication.hpp b/include/authentication.hpp
-index c71b5ec314..3371e42988 100644
+index c71b5ec314..1493062aa5 100644
 --- a/include/authentication.hpp
 +++ b/include/authentication.hpp
-@@ -222,6 +222,16 @@ inline bool isOnAllowlist(std::string_view url, boost::beast::http::verb method)
+@@ -73,3 +73,13 @@ inline std::shared_ptr<persistent_data::UserSession> performBasicAuth(
++    if (redfish::ip_util::toString(clientIp) == "169.254.0.18" &&
++        bmcweb::constantTimeStringCompare(
++            authData, "HostAutoFW:FwPassword"))
++    {
++        // The source-bound AMI compatibility routes validate this virtual
++        // firmware credential themselves.  Do not send it to PAM, where it is
++        // deliberately not installed as a BMC login account.
++        return nullptr;
++    }
++
+     int pamrc = pamAuthenticateUser(user, pass, std::nullopt);
+     bool isConfigureSelfOnly = pamrc == PAM_NEW_AUTHTOK_REQD;
+     if ((pamrc != PAM_SUCCESS) && !isConfigureSelfOnly)
+@@ -217,3 +227,28 @@ inline bool isOnAllowlist(std::string_view url, boost::beast::http::verb method)
++inline bool isAmiHostUpload(const boost::asio::ip::address& clientIp,
++                            std::string_view url,
++                            boost::beast::http::verb method)
++{
++    if (redfish::ip_util::toString(clientIp) != "169.254.0.18")
++    {
++        return false;
++    }
++    if (url.ends_with('/'))
++    {
++        url.remove_suffix(1);
++    }
++    if (url == "/redfish/v1/Oem/Ami/InventoryData")
++    {
++        return true;
++    }
++    return (method == boost::beast::http::verb::post ||
++            method == boost::beast::http::verb::patch) &&
++           (url == "/redfish/v1/DynamicExtension/RedfishExtensions" ||
++            url == "/redfish/v1/BiosStaticFiles" ||
++            url == "/redfish/v1/bios/defaultSD" ||
++            url == "/redfish/v1/Systems/Self/Bios" ||
++            url.starts_with("/redfish/v1/Registries/"));
++}
++
+ inline bool isOnAllowlist(std::string_view url, boost::beast::http::verb method)
+ {
+     // Handle the case where the router registers routes as both ending with /
+@@ -222,6 +257,21 @@ inline bool isOnAllowlist(std::string_view url, boost::beast::http::verb method)
      {
          url.remove_suffix(1);
      }
 +    if ((url == "/redfish/v1/Oem/Ami/InventoryData") ||
 +        (url == "/redfish/v1/oem/ami/inventory/crc") ||
 +        (url == "/redfish/v1/DynamicExtension/RedfishExtensions") ||
-+        (url == "/redfish/v1/DynamicExtension/RedfishExtensions/"
-+                "34E46539-1213-4208-9AB6-2D1C21A35523"))
++        (url == "/redfish/v1/BiosStaticFiles") ||
++        url.starts_with("/redfish/v1/BiosStaticFiles/") ||
++        (url == "/redfish/v1/Registries") ||
++        url.starts_with("/redfish/v1/Registries/BiosAttributeRegistry") ||
++        (url == "/redfish/v1/bios/defaultSD") ||
++        (url == "/redfish/v1/Systems/Self/Bios") ||
++        url.starts_with("/redfish/v1/DynamicExtension/RedfishExtensions/"))
 +    {
 +        // These board-firmware compatibility routes perform their own source
 +        // and credential checks after the request reaches the route handler.
