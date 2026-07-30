@@ -1399,6 +1399,14 @@ inline void requestRoutesAmiHostInventory(App& app)
     BMCWEB_ROUTE(app, "/redfish/v1/Systems/Self/Bios/")
         .privileges({})
         .methods(boost::beast::http::verb::get)(handleAmiSystemBiosGet);
+    // The uploaded AMI setup JavaScript appends its Config member to this
+    // already-complete path.  Keep the exact resulting alias local to the
+    // authenticated BIOS client instead of rewriting firmware-owned assets.
+    BMCWEB_ROUTE(
+        app,
+        "/redfish/v1/Systems/Self/Bios/redfish/v1/Systems/Self/Bios/")
+        .privileges({})
+        .methods(boost::beast::http::verb::get)(handleAmiSystemBiosGet);
     BMCWEB_ROUTE(app, "/redfish/v1/Systems/Self/Bios/")
         .privileges({})
         .methods(boost::beast::http::verb::post)(handleAmiSystemBiosPost);
