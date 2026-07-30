@@ -8,6 +8,7 @@ ConditionPathIsDirectory=/sys/kernel/config/usb_gadget
 [Service]
 Type=oneshot
 RemainAfterExit=yes
+ExecStartPre=/usr/libexec/ami-host-network-config
 ExecStart=/usr/libexec/ami-host-interface start
 ExecStop=/usr/libexec/ami-host-interface stop
 
