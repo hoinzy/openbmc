@@ -421,3 +421,48 @@ The compatibility patch adds a per-function ConfigFS
 `0x000d`, which restores directed, all-multicast, and broadcast reception plus
 carrier on every `INIT`. This is intentionally board-scoped; standard RNDIS
 behavior is unchanged for every function that leaves the attribute at zero.
+
+## AMI host-inventory publication
+
+The packet-filter image was installed and exercised across complete BIOS
+boots on 2026-07-30. `RfInventory` reached the source-restricted bmcweb route
+from `169.254.0.18`, uploaded a 215,111-byte `inventory.json`, and completed
+the staged transaction. The captured JSON has SHA-256
+`efb4e7d84cb2b3e1f21c4ca9222335bb5b5c81f02f3689dbd0f22d447eb579db`.
+
+The live payload contains:
+
+| Category | Firmware records | Published present objects |
+| --- | ---: | ---: |
+| Processor | 1 | 1 |
+| DIMM | 8 | 8 |
+| PCIe device | 61 detailed | 60 |
+| PCIe function | 154 detailed, 89 present | properties on the 60 devices |
+
+The omitted PCIe record is an absent `00_00_00` aggregate with 66 unresolved
+function records. It is not a valid PCI multifunction device. Present devices
+remain limited to eight functions.
+
+The inventory daemon publishes an ObjectManager at
+`/xyz/openbmc_project/inventory`. Authenticated Redfish then reported one
+processor, eight memory modules, and 60 PCIe devices. The processor detail
+resource reported the AMD Ryzen Threadripper 3970X with 32 cores and 64
+threads. A populated DIMM resource reported 16 GiB DDR4 at 3200 MHz and part
+number `F4-3600C16-16GTRGC`.
+
+The firmware-supplied CRC values are `DIMM=2117671117`, `CPU=3505128955`, and
+`PCIE=305144322`. They are carried inside the uploaded JSON. Both
+`inventory.json` and `crc.json` survived an inventory-daemon restart. Their
+live SHA-256 values were:
+
+```text
+inventory.json c37f8d0053a62e1e98026b6e05f1589246caed10dffc7626075de0f4f08bf34e
+crc.json       51d6464657e01b61aaf9ab5dfdc498a9d98d429d83490ce3fca98e471ff084b6
+```
+
+On the next BIOS reboot, `RfInventory` performed
+`GetCrcs -> Stage -> Commit` with a CRC-only System/Chassis payload. The
+daemon accepted this sparse update without replacing or republishing the
+hardware categories. It ended with `Pending=false`, an empty `LastError`, and
+the same 1/8/60 Redfish counts. No Ubuntu service, SMBIOS converter, or host
+filesystem dependency was involved.

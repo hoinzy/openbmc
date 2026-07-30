@@ -62,13 +62,14 @@ assigned drivers.
 - entity-manager definitions for all 13 verified voltage inputs
 - FAN1 and FAN3 tach sensors
 - open-loop full-duty startup for every declared PWM channel
+- AMI-compatible RNDIS host interface and source-restricted Redfish receiver
+- BIOS-supplied CPU, DIMM, and PCIe inventory with persistent CRC state
 
-The baseline has now booted successfully from RAM on the target. The physical
-FRU selected the TRX40 Entity Manager configuration, all 13 voltage sensors
-instantiated, standby readings were plausible, the dedicated MAC linked at
-1 Gbit/s, and every PWM control read `255`. This proves the kernel/device-tree
-and inventory baseline without claiming flash installation or a full systemd
-boot.
+The baseline first booted successfully from RAM and has since been installed
+and updated through the WebUI. The physical FRU selected the TRX40 Entity
+Manager configuration, all 13 voltage sensors instantiated, standby readings
+were plausible, the dedicated MAC linked at 1 Gbit/s, and every PWM control
+read `255`.
 
 The board DTS is now carried by the tracked Linux patch in this layer rather
 than being copied into the kernel work tree by a recipe task. This keeps the
@@ -79,6 +80,13 @@ chassis intrusion, closed-loop fan control, or BIOS update support. A later
 powered-host pass also validated the configured power-control lifecycle and
 Redfish `PowerState: On`; thermal and fan/PSU Redfish coverage remains
 incomplete.
+
+The BIOS-native AMI inventory path is now validated without host OS support.
+Across complete host reboots, the BIOS uploads processor, memory, and PCIe
+data through the dedicated RNDIS interface. OpenBMC persists that data and
+publishes standard inventory interfaces. Redfish reports one Threadripper
+3970X processor, eight populated 16 GiB DDR4 DIMMs, and 60 present PCIe
+devices. CRC-only sparse boots retain those objects without republishing them.
 
 The first RAM boot exposed one inherited X570D4U device-tree bug: the reserved
 graphics framebuffer was not linked to the GFX controller. The local board
@@ -98,7 +106,7 @@ host-on test, so the upstream X570D4U pinctrl description remains unchanged.
 
 | Workstream | State | Focused engineering time |
 | --- | --- | ---: |
-| Boot, flash, DRAM, UART, dedicated MAC | RAM boot passed; external-programmer recovery and flash boot remain | 1-3 days |
+| Boot, flash, DRAM, UART, dedicated MAC | repeated WebUI updates and flash boots pass; retain the proven external recovery path | 0-1 day documentation |
 | NCSI and MAC EEPROM offsets | both MACs verified at `0x3f80`/`0x3f88`; live NCSI discovery still fails and pin 24 reports `EPERM` | 1-2 days |
 | Power/reset/state GPIO | powered-host pass validated GPIO ownership and power/reset/POST transitions; repeat on a clean boot and upstream the evidence | 1-2 days |
 | KCS, POST snoop, SOL | definitions exist; exercise full host lifecycle | 1-3 days |
@@ -108,7 +116,7 @@ host-on test, so the upstream X570D4U pinctrl description remains unchanged.
 | KVM/video | AST path negotiates 1024x768 with onboard VGA primary, but captures remain black | 2-5 days |
 | KVM/USB stability | first S0 KVM use correlated with BMC RAM-boot reset/fallback and host USB `-71`; UART reproduction required | 2-5 days |
 | Virtual media | WebSocket/NBD negotiation and AST mass-storage gadget pass in RAM after the board-layer jsnbd fix; host enumeration and sustained reads remain | 1-2 days |
-| Redfish thermal/power surface | host/chassis `PowerState: On` now works; fan and PSU collections are empty, ThermalMetrics returns HTTP 500, and host CPU/DIMM/PCI inventory is absent | 2-4 days |
+| Redfish thermal/power surface | host/chassis power plus CPU/DIMM/PCIe inventory work; fan and PSU collections are empty and ThermalMetrics returns HTTP 500 | 1-3 days |
 | LEDs, intrusion, PROCHOT/THERMTRIP | GPIO mapping and policy required | 2-5 days |
 | Upstream-quality dedicated DTS and reviews | split kernel/entity-manager/openbmc changes | 1-3 weeks |
 

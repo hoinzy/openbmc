@@ -34,32 +34,40 @@ The original `eth.ko` emits it with the host MAC formatted as 12 hexadecimal
 characters and a maximum segment size of 1514 bytes. The board kernel patch
 adds the equivalent descriptor to `f_rndis`.
 
-`AmiRedfishDynExt` then checks the embedded inventory extension before enabling
-`RfInventory`. It requests
+`AmiRedfishDynExt` then checks its embedded extensions before enabling the
+firmware services. The inventory path requests
 `/redfish/v1/DynamicExtension/RedfishExtensions/34E46539-1213-4208-9AB6-2D1C21A35523`
 and compares JSON fields `Id` and `Md5Checksum` with the embedded raw file.
 Its MD5 is `24e5614de3ead58517b9a1f001f272a8`. bmcweb advertises the native
-OpenBMC receiver as that already-installed extension. It does not accept,
-extract, or execute the vendor Lua archive.
+OpenBMC receiver as that already-installed extension. The BIOS-default data
+service similarly checks extension
+`24C5E8D6-7D92-4E54-916E-FEE44013F13F`, with MD5
+`f33b77b217dd5fc1deae86d64c5b1e28`. Neither route accepts, extracts, or
+executes a vendor Lua archive.
 
 ## Firmware protocol
 
 The implemented transaction follows the firmware:
 
 1. Probe `/redfish/v1/` and `/redfish/v1/Oem/Ami/InventoryData`.
-2. Read and update `/redfish/v1/oem/ami/inventory/crc`.
+2. Read the committed CRC groups. The initial inventory response also supplies
+   the `System`, `Chassis`, and `Storage` skeleton consumed by `RfInventory`.
 3. POST `multipart/form-data` to the inventory endpoint. The part is named
    `static_file`, its filename is `inventory.json`, and its body is JSON.
 4. PATCH the inventory endpoint with `{"BootComplete":true}`.
 
-CRC groups include `CPU`, `DIMM`, and `PCIE`. A firmware upload may omit an
-unchanged group. The receiver therefore stages each present category, retains
-the last committed value for omitted categories, and publishes only after
-`BootComplete`. A present but empty category intentionally clears that category.
-The complete committed snapshot and CRC state are persisted under
+CRC groups include `CPU`, `DIMM`, and `PCIE`. `RfInventory` includes its
+`GroupCrcList` in the uploaded JSON rather than calling the separate CRC write
+route. A changed boot uploads detailed CPU, DIMM, and PCIe categories. An
+unchanged boot still uploads a small System/Chassis document containing only
+the CRC map. The receiver therefore accepts CRC-only sparse updates, retains
+omitted hardware categories, and publishes changed inventory only after
+`BootComplete`. A present but empty category intentionally clears that
+category. The complete committed snapshot and CRC state are persisted under
 `/var/lib/ami-host-inventory`.
 
-The CRC endpoint uses the firmware's exact array-of-singletons representation:
+The compatibility CRC endpoint uses the firmware's array-of-singletons
+representation:
 `{"GroupCrcList":[{"DIMM":value},{"CPU":value},{"PCIE":value}]}`.
 
 The parser accepts the CPU, DIMM, and PCIe field names emitted by `RfInventory`,
@@ -67,7 +75,9 @@ applies a 2 MiB request limit, bounds object counts and strings, and rejects
 malformed entries before changing D-Bus. It publishes
 `xyz.openbmc_project.Inventory.Item.Cpu`,
 `xyz.openbmc_project.Inventory.Item.Dimm`, and
-`xyz.openbmc_project.Inventory.Item.PCIeDevice` interfaces for bmcweb.
+`xyz.openbmc_project.Inventory.Item.PCIeDevice` interfaces for bmcweb. The
+service owns an ObjectManager at `/xyz/openbmc_project/inventory`, as required
+by bmcweb's processor detail path.
 
 ## USB and authentication boundary
 
@@ -125,9 +135,32 @@ The board kernel therefore adds an opt-in ConfigFS
 `initial_packet_filter`. It is zero by default and does not change conforming
 RNDIS functions. `ami-host-interface` sets it to `0x000d` (directed,
 all-multicast, and broadcast), causing each `INIT` to restore carrier and the
-data-initialized state. Hardware validation still requires installing the
-image with this final quirk, capturing one BIOS upload, and confirming the
-resulting D-Bus and Redfish/WebUI CPU, DIMM, and PCIe resources.
+data-initialized state.
+
+The image containing that quirk was installed and validated on 2026-07-30. A
+complete BIOS upload produced 215,111 bytes of JSON with SHA-256
+`efb4e7d84cb2b3e1f21c4ca9222335bb5b5c81f02f3689dbd0f22d447eb579db`.
+It contained one processor, eight DIMMs, 61 detailed PCIe device records, and
+154 PCIe function records. One absent `00_00_00` aggregate represented
+unresolved slots and was intentionally skipped; 60 present PCIe devices were
+published.
+
+The committed Redfish collections report one processor, eight memory modules,
+and 60 PCIe devices. The processor resource reports a 32-core, 64-thread
+Threadripper 3970X, and each populated DIMM reports 16 GiB DDR4 at 3200 MHz.
+The committed CRCs are:
+
+```text
+DIMM = 2117671117
+CPU  = 3505128955
+PCIE = 305144322
+```
+
+The snapshot and CRC files survived a daemon restart. A subsequent BIOS reboot
+then completed `GetCrcs -> Stage -> Commit` using the CRC-only sparse payload,
+left `Pending=false` and `LastError=""`, preserved the same Redfish counts,
+and did not republish unchanged hardware objects. This validates the
+BIOS-to-BMC path without a host OS service.
 
 ## BIOS configuration lead: GPIO 219
 
