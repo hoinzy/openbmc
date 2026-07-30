@@ -1,0 +1,75 @@
+From 4cd238eb2f434397644e31a8c72993f0a345ed9a Mon Sep 17 00:00:00 2001
+From: Till Heinzerling <1684934+hoinzy@users.noreply.github.com>
+Date: Thu, 31 Jul 2026 01:27:00 +0200
+Subject: [PATCH] bmcweb: enable Redfish virtual media routes
+
+The vm-nbdproxy option is permanently disabled upstream and cannot be enabled
+together with the browser-upload WebSocket.  This platform supplies the
+legacy xyz.openbmc_project.VirtualMedia backend independently, so register its
+Redfish routes and Manager link without changing the WebSocket mode.
+
+Install the OpenBMCVirtualMedia schema used by the OEM image-listing action at
+the same time.
+
+Upstream-Status: Inappropriate [platform supplies an archived backend]
+---
+ redfish-core/lib/managers.hpp                 | 9 +++------
+ redfish-core/schema/oem/openbmc/meson.build  | 2 +-
+ redfish-core/src/redfish.cpp                  | 5 +----
+ 3 files changed, 5 insertions(+), 11 deletions(-)
+
+diff --git a/redfish-core/lib/managers.hpp b/redfish-core/lib/managers.hpp
+index c1c31a5f..d67bd175 100644
+--- a/redfish-core/lib/managers.hpp
++++ b/redfish-core/lib/managers.hpp
+@@ -761,11 +761,8 @@ inline void
+     manager_utils::getServiceIdentification(asyncResp, false);
+ 
+-    if constexpr (BMCWEB_VM_NBDPROXY)
+-    {
+-        asyncResp->res.jsonValue["VirtualMedia"]["@odata.id"] =
+-            boost::urls::format("/redfish/v1/Managers/{}/VirtualMedia",
+-                                managerId);
+-    }
++    asyncResp->res.jsonValue["VirtualMedia"]["@odata.id"] =
++        boost::urls::format("/redfish/v1/Managers/{}/VirtualMedia",
++                            managerId);
+ 
+     // Manager.Reset (an action) can be many values, OpenBMC only
+     // supports BMC reboot.
+diff --git a/redfish-core/schema/oem/openbmc/meson.build b/redfish-core/schema/oem/openbmc/meson.build
+index 3adb73fd..bda50f52 100644
+--- a/redfish-core/schema/oem/openbmc/meson.build
++++ b/redfish-core/schema/oem/openbmc/meson.build
+@@ -2,12 +2,12 @@
+ schemas_to_install = {
+     'OpenBMCAccountService': 'v1_0_0',
+     'OpenBMCManager': 'v1_1_0',
++    'OpenBMCVirtualMedia': 'v1_0_0',
+ }
+ 
+ # Mapping from option key name to schemas that should be installed if that option is enabled
+ schemas = {
+     'redfish-provisioning-feature': 'OpenBMCComputerSystem',
+-    #'vm-nbdproxy': 'OpenBMCVirtualMedia',
+ }
+ 
+ foreach option_key, schema : schemas
+diff --git a/redfish-core/src/redfish.cpp b/redfish-core/src/redfish.cpp
+index 91950975..ed8a0e70 100644
+--- a/redfish-core/src/redfish.cpp
++++ b/redfish-core/src/redfish.cpp
+@@ -199,10 +199,7 @@ RedfishService::RedfishService(App& app)
+     requestRoutesBiosService(app);
+     requestRoutesBiosReset(app);
+ 
+-    if constexpr (BMCWEB_VM_NBDPROXY)
+-    {
+-        requestNBDVirtualMediaRoutes(app);
+-    }
++    requestNBDVirtualMediaRoutes(app);
+ 
+     if constexpr (BMCWEB_REDFISH_HOST_LOGGER)
+     {
+-- 
+2.51.0

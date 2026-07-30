@@ -8,6 +8,7 @@ SRC_URI:append:trx40d8-2n2t = " \
     file://0003-bmcweb-allow-same-origin-bios-ui.patch \
     file://0004-virtual-media-accept-NFS-image-URLs.patch \
     file://0005-virtual-media-add-OEM-share-image-listing-action.patch \
+    file://0006-bmcweb-enable-redfish-virtual-media-routes.patch \
     file://ami_host_inventory.hpp \
     "
 
