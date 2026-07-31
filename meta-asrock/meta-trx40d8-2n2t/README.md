@@ -45,6 +45,14 @@ agent. See
 BMC-local persistence, source-restricted authentication, validation results,
 and the separate GPIO 219 SMI-mailbox lead.
 
+The static update image uses 1 MiB XZ-compressed SquashFS blocks with the ARM
+branch filter. The FIT already embeds the kernel as a self-decompressing
+`zImage` and the initramfs as `cpio.xz`; wrapping either in another compression
+layer would only add bootloader complexity. Network Virtual Media packages only
+the `nbdkit` file and curl plugins that its source invokes. These choices keep
+the signed update tar below bmcweb's upstream 30 MiB request limit without a
+board-specific upload-size override.
+
 ## Safety state
 
 The first implementation inherits the known X570D4U wiring and overrides only

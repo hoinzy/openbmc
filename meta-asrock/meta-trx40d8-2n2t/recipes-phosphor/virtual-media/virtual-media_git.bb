@@ -28,6 +28,8 @@ DEPENDS = " \
 RDEPENDS:${PN} = " \
     nbd-client \
     nbdkit \
+    nbdkit-plugin-curl \
+    nbdkit-plugin-file \
     nfs-utils-mount \
     "
 
