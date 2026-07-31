@@ -1,0 +1,13 @@
+[Unit]
+Description=Disable ENE-controlled DRAM RGB lighting
+After=systemd-modules-load.service
+ConditionPathExists=/dev/i2c-7
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/trx40d8-ram-rgb-off --monitor --retry-delay 5
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

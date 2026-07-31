@@ -1,0 +1,213 @@
+#!/bin/sh
+#
+# Disable the ENE DDR4 lighting controllers connected to the BMC-only DIMM
+# management bus on the ASRock Rack TRX40D8-2N2T.
+#
+# Vendor firmware exposes this path through IPMI Master Write-Read as bus 7,
+# mux 0x71, channels 0x01/0x02, and ENE controller 0x77.  OpenBMC can access
+# the same AST2500 I2C controller directly and does not need a host OS agent.
+
+set -u
+
+bus=7
+mux_address=0x71
+ene_address=0x77
+attempts=1
+monitor=false
+retry_delay=1
+original_channel=
+
+usage()
+{
+    echo "Usage: $0 [--attempts COUNT] [--monitor] [--retry-delay SECONDS]" >&2
+    exit 64
+}
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --attempts)
+            [ "$#" -ge 2 ] || usage
+            case "$2" in
+                *[!0-9]*|'') usage ;;
+            esac
+            [ "$2" -gt 0 ] || usage
+            attempts=$2
+            shift 2
+            ;;
+        --monitor)
+            monitor=true
+            shift
+            ;;
+        --retry-delay)
+            [ "$#" -ge 2 ] || usage
+            case "$2" in
+                *[!0-9]*|'') usage ;;
+            esac
+            [ "$2" -gt 0 ] || usage
+            retry_delay=$2
+            shift 2
+            ;;
+        *)
+            usage
+            ;;
+    esac
+done
+
+i2c_read()
+{
+    i2ctransfer -y "$bus" "$@" 2>/dev/null
+}
+
+i2c_write()
+{
+    i2ctransfer -y "$bus" "$@" >/dev/null 2>&1
+}
+
+read_dimm_channel()
+{
+    value=$(i2c_read "r1@$mux_address") || return 1
+    value=${value#0x}
+    case "$value" in
+        [0-9a-fA-F][0-9a-fA-F]) printf '%s\n' "$value" ;;
+        *) return 1 ;;
+    esac
+}
+
+select_dimm_channel()
+{
+    i2c_write "w1@$mux_address" "$1"
+}
+
+restore_dimm_channel()
+{
+    if [ -n "$original_channel" ]; then
+        select_dimm_channel "0x$original_channel" || true
+        original_channel=
+    fi
+}
+
+has_ene_signature()
+{
+    register=160
+    expected=0
+
+    while [ "$register" -le 175 ]; do
+        register_hex=$(printf '0x%02x' "$register")
+        expected_hex=$(printf '%02x' "$expected")
+        value=$(i2c_read "w1@$ene_address" "$register_hex" r1) ||
+            return 1
+        value=${value#0x}
+        [ "$value" = "$expected_hex" ] || return 1
+        register=$((register + 1))
+        expected=$((expected + 1))
+    done
+}
+
+ene_set_pointer()
+{
+    register=$1
+    register_high=$(printf '0x%02x' $(((register >> 8) & 255)))
+    register_low=$(printf '0x%02x' $((register & 255)))
+    i2c_write "w3@$ene_address" 0x00 "$register_high" "$register_low"
+}
+
+ene_write()
+{
+    ene_set_pointer "$1" || return 1
+    value=$(printf '0x%02x' "$2")
+    i2c_write "w2@$ene_address" 0x01 "$value"
+}
+
+ene_read()
+{
+    ene_set_pointer "$1" || return 1
+    i2c_read "w1@$ene_address" 0x81 r1
+}
+
+turn_off_selected_channel()
+{
+    has_ene_signature || return 1
+
+    # ENE mode Off, then apply the new mode.
+    ene_write 32801 0 || return 1       # 0x8021 = ENE_MODE_OFF
+    ene_write 32928 1 || return 1       # 0x80a0 = ENE_APPLY_VAL
+
+    value=$(ene_read 32801) || return 1
+    [ "$value" = "0x00" ]
+}
+
+turn_off_rgb()
+{
+    original_channel=$(read_dimm_channel) || {
+        original_channel=
+        return 1
+    }
+
+    for channel in 0x01 0x02; do
+        if ! select_dimm_channel "$channel" ||
+           ! turn_off_selected_channel; then
+            restore_dimm_channel
+            return 1
+        fi
+        echo "Disabled ENE DRAM RGB on BMC mux channel $channel"
+    done
+
+    restore_dimm_channel
+}
+
+terminate()
+{
+    restore_dimm_channel
+    exit 0
+}
+
+trap restore_dimm_channel EXIT
+trap terminate HUP INT TERM
+
+if [ "$monitor" = true ]; then
+    programmed=false
+    unavailable_logged=false
+
+    while true; do
+        if [ "$programmed" = true ]; then
+            # A NACK marks the host-ownership transition.  Re-arm the writer so
+            # the next interval in which the BMC owns the DIMM bus is handled.
+            if ! read_dimm_channel >/dev/null; then
+                programmed=false
+                unavailable_logged=false
+            fi
+        elif turn_off_rgb; then
+            logger -t trx40d8-ram-rgb-off \
+                "disabled both ENE DRAM RGB banks and verified Off mode"
+            programmed=true
+            unavailable_logged=false
+        elif [ "$unavailable_logged" = false ]; then
+            logger -t trx40d8-ram-rgb-off \
+                "waiting for BMC ownership of the ENE DRAM RGB bus"
+            unavailable_logged=true
+        fi
+
+        sleep "$retry_delay"
+    done
+fi
+
+attempt=1
+while [ "$attempt" -le "$attempts" ]; do
+    if turn_off_rgb; then
+        logger -t trx40d8-ram-rgb-off \
+            "disabled both ENE DRAM RGB banks and verified Off mode"
+        exit 0
+    fi
+
+    if [ "$attempt" -lt "$attempts" ]; then
+        sleep "$retry_delay"
+    fi
+    attempt=$((attempt + 1))
+done
+
+# Exit 2 distinguishes an unavailable host-owned bus from a programming error
+# for manual callers.  The systemd service uses monitor mode and keeps waiting
+# for the next interval in which the BMC owns this bus.
+logger -t trx40d8-ram-rgb-off \
+    "ENE DRAM RGB bus unavailable after $attempts attempts; will retry on the next power transition"
+exit 2

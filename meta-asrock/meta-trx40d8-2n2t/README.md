@@ -26,6 +26,15 @@ NCT6796 profile exposed `TSI0_TEMP` and `TSI1_TEMP` through hwmon, proving the
 transport and driver path. Which TSI channel is wired to TR1 still needs a
 controlled hardware correlation, so neither channel is named `TR1` yet.
 
+The DIMM lighting controllers are also on a BMC-routed management bus. Vendor
+firmware's IPMI Master Write-Read handler maps its bus 7 directly to the
+AST2500 controller at `0x1e78a300`; behind it are a PCA9546-compatible mux at
+`0x71` and two ENE lighting banks at `0x77`. `ram-rgb-off.service` monitors
+that bus and applies ENE Off mode to mux channels `0x01` and `0x02` whenever
+the BMC owns the route. It verifies the ENE signature and mode readback and
+restores the original mux selection after every attempt. This replaces the
+earlier host-side IPMI workaround and requires no host OS service.
+
 The BIOS AMI inventory and configuration protocols are received over the
 dedicated RNDIS Redfish host interface. Hardware is published as standard
 OpenBMC CPU, DIMM, and PCI inventory. The firmware's 122-entry BIOS attribute

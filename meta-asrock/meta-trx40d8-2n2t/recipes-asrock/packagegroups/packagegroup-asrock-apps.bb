@@ -29,5 +29,6 @@ RDEPENDS:${PN}-system = " \
         phosphor-ipmi-blobs \
         ami-host-interface \
         ami-host-inventory \
+        ram-rgb-off \
         virtual-media \
         "
