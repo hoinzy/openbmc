@@ -1,7 +1,13 @@
-# The vendor firmware accesses the host flash through the AST2500 SPI1
-# controller without a board-specific GPIO hook.  Keep the array explicit so
-# the common updater can share its attach and restore path with other boards.
-BIOS_UPDATE_PREP_GPIOS=()
+# The vendor flash library asserts AST2500 GPIOJ1 low before loading its host
+# SPI driver.  During teardown it drives the line high for 100 ms and then
+# restores it to input, returning ownership of the flash to the host.
+BIOS_UPDATE_PREP_GPIOS=(
+  output-bios-flash-bmc-select-n=0
+)
+BIOS_UPDATE_GPIO_RELEASE_USEC=100000
+BIOS_UPDATE_RELEASE_INPUT_GPIOS=(
+  output-bios-flash-bmc-select-n
+)
 BIOS_UPDATE_MANUAL_BIND=true
 BIOS_UPDATE_MAGIC_OFFSET=$((0x20000))
 BIOS_UPDATE_MAGIC=aa55aa55

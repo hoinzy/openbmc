@@ -121,6 +121,7 @@ restore_bios_flash()
 
 	# Detach in reverse order
 	for ((i = ${#prepared_gpios[@]} - 1; i >= 0; i--)) ; do
+		local gpio release_gpio
 		read -ra kv <<<"${prepared_gpios[i]/=/ }"
 		notvalue=$((! kv[1]))
 		info "Resetting ${kv[0]} to ${notvalue}..."
@@ -131,11 +132,33 @@ restore_bios_flash()
 			status=1
 			continue
 		fi
+		# Some muxes need a defined inactive pulse before their GPIO is
+		# released.  Preserve the existing immediate-release behaviour unless
+		# the board requests a pulse duration.
 		# shellcheck disable=SC2086
-		if ! gpioset -m exit ${gpio}="$notvalue"; then
+		if [ "${BIOS_UPDATE_GPIO_RELEASE_USEC:-0}" -gt 0 ]; then
+			gpioset -m time -u "$BIOS_UPDATE_GPIO_RELEASE_USEC" \
+				${gpio}="$notvalue"
+		else
+			gpioset -m exit ${gpio}="$notvalue"
+		fi || {
 			info "Error: failed to restore ${kv[0]} GPIO"
 			status=1
-		fi
+			continue
+		}
+
+		for release_gpio in "${BIOS_UPDATE_RELEASE_INPUT_GPIOS[@]}"; do
+			[ "$release_gpio" = "${kv[0]}" ] || continue
+			info "Releasing ${kv[0]} to input..."
+			# A character-device input request reproduces the vendor's final
+			# direction change; discard the sampled value.
+			# shellcheck disable=SC2086
+			if ! gpioget ${gpio} >/dev/null; then
+				info "Error: failed to release ${kv[0]} GPIO to input"
+				status=1
+			fi
+			break
+		done
 		sleep 1
 	done
 	prepared_gpios=()

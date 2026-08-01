@@ -7,33 +7,33 @@ Add the board device tree and its AST2500 DTB target. The board reuses the
 X570D4U wiring where it has been verified, but moves the board EEPROM from
 I2C7 to I2C1. It also associates the existing reserved framebuffer memory
 with the GFX controller, configures the BMC VUART for host COM2, and exposes
-the host BIOS flash through the AST2500 SPI1 controller.
+the host BIOS flash and its GPIOJ1 ownership mux through the AST2500 SPI1
+controller.
 
 Upstream-Status: Pending
 Signed-off-by: Till Heinzerling <1684934+hoinzy@users.noreply.github.com>
 ---
  arch/arm/boot/dts/aspeed/Makefile                         |  1 +
- .../dts/aspeed/aspeed-bmc-asrock-trx40d8-2n2t.dts         | 73 +++++++++++++++++++++
- 2 files changed, 74 insertions(+)
+ .../dts/aspeed/aspeed-bmc-asrock-trx40d8-2n2t.dts         | 116 +++++++++++++++++++++
+ 2 files changed, 117 insertions(+)
 
 diff --git a/arch/arm/boot/dts/aspeed/Makefile b/arch/arm/boot/dts/aspeed/Makefile
 index 371e5c0d0ce7..f76c9b609d8f 100644
 --- a/arch/arm/boot/dts/aspeed/Makefile
 +++ b/arch/arm/boot/dts/aspeed/Makefile
-@@ -16,6 +16,7 @@ dtb-$(CONFIG_ARCH_ASPEED) += \
+@@ -16,5 +16,6 @@ dtb-$(CONFIG_ARCH_ASPEED) += \
  	aspeed-bmc-asrock-romed8hm3.dtb \
  	aspeed-bmc-asrock-spc621d8hm3.dtb \
  	aspeed-bmc-asrock-x570d4u.dtb \
 +	aspeed-bmc-asrock-trx40d8-2n2t.dtb \
  	aspeed-bmc-asus-kommando-ipmi-card.dtb \
  	aspeed-bmc-asus-x4tf.dtb \
- 	aspeed-bmc-asus-x4tfb.dtb \
 diff --git a/arch/arm/boot/dts/aspeed/aspeed-bmc-asrock-trx40d8-2n2t.dts b/arch/arm/boot/dts/aspeed/aspeed-bmc-asrock-trx40d8-2n2t.dts
 new file mode 100644
 index 000000000000..000000000000
 --- /dev/null
 +++ b/arch/arm/boot/dts/aspeed/aspeed-bmc-asrock-trx40d8-2n2t.dts
-@@ -0,0 +1,73 @@
+@@ -0,0 +1,116 @@
 +// SPDX-License-Identifier: GPL-2.0+
 +/*
 + * Device tree for the ASRock Rack TRX40D8-2N2T.
@@ -63,6 +63,49 @@ index 000000000000..000000000000
 +		m25p,fast-read;
 +		spi-max-frequency = <33000000>;
 +	};
++};
++
++&gpio {
++	/* GPIOJ1 selects BMC access to the shared host BIOS flash. */
++	gpio-line-names =
++	/*  A */ "input-locatorled-n", "", "", "", "", "", "", "",
++	/*  B */ "input-bios-post-cmplt-n", "", "", "", "", "", "", "",
++	/*  C */ "", "", "", "", "", "", "control-locatorbutton-n", "",
++	/*  D */ "button-power-n", "control-power-n", "button-reset-n",
++		 "control-reset-n", "", "", "", "",
++	/*  E */ "", "", "", "", "", "", "", "",
++	/*  F */ "", "", "", "", "", "", "", "",
++	/*  G */ "output-hwm-vbat-enable", "input-id0-n", "input-id1-n",
++		 "input-id2-n", "input-aux-smb-alert-n", "",
++		 "input-psu-smb-alert-n", "",
++	/*  H */ "", "", "", "", "input-mfg-mode-n", "",
++		 "led-heartbeat-n", "input-case-open-n",
++	/*  I */ "", "", "", "", "", "", "", "",
++	/*  J */ "output-bmc-ready-n", "output-bios-flash-bmc-select-n",
++		 "", "", "", "", "", "",
++	/*  K */ "", "", "", "", "", "", "", "",
++	/*  L */ "", "", "", "", "", "", "", "",
++	/*  M */ "", "", "", "", "", "", "", "",
++	/*  N */ "", "", "", "", "", "", "", "",
++	/*  O */ "", "", "", "", "", "", "", "",
++	/*  P */ "", "", "", "", "", "", "", "",
++	/*  Q */ "", "", "", "", "input-bmc-smb-present-n", "", "",
++		 "input-pcie-wake-n",
++	/*  R */ "", "", "", "", "", "", "", "",
++	/*  S */ "input-bmc-pchhot-n", "", "", "", "", "", "", "",
++	/*  T */ "", "", "", "", "", "", "", "",
++	/*  U */ "", "", "", "", "", "", "", "",
++	/*  V */ "", "", "", "", "", "", "", "",
++	/*  W */ "", "", "", "", "", "", "", "",
++	/*  X */ "", "", "", "", "", "", "", "",
++	/*  Y */ "input-sleep-s3-n", "input-sleep-s5-n", "", "", "", "",
++		 "", "",
++	/*  Z */ "", "", "led-fault-n", "output-bmc-throttle-n", "", "",
++		 "", "",
++	/* AA */ "input-cpu1-thermtrip-latch-n", "",
++		 "input-cpu1-prochot-n", "", "", "", "", "",
++	/* AB */ "", "input-power-good", "", "", "", "", "", "",
++	/* AC */ "", "", "", "", "", "", "", "";
 +};
 +
 +&i2c7 {
