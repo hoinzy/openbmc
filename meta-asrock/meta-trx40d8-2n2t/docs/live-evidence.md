@@ -500,3 +500,390 @@ daemon accepted this sparse update without replacing or republishing the
 hardware categories. It ended with `Pending=false`, an empty `LastError`, and
 the same 1/8/60 Redfish counts. No Ubuntu service, SMBIOS converter, or host
 filesystem dependency was involved.
+
+## Flashed-image SOL and network identity validation
+
+The `20260731005845` flashed image was exercised with BIOS `L1.19F` and the
+host booting Ubuntu. The host completed POST and became reachable over SSH.
+Ubuntu remained in systemd's `starting` state only because `k3s-agent` could
+not contact `192.168.178.10:6443`; this did not prevent the operating system,
+network, or SSH from working. The same boot reported duplicate ACPI I2C
+objects from the BIOS and a failure of the host-side `ram-rgb-off.service`.
+
+BIOS and Linux both expose the SOL UART at `0x2f8`, IRQ 3, and 115200 baud.
+The BMC-side VUART was configured for the same address and IRQ, but BIOS output
+produced only a NUL/break byte. A Linux write longer than the 16-byte UART FIFO
+stopped after exactly 16 bytes and received no transmit-empty interrupt. With
+the BMC VUART `sirq_polarity` changed from `0` to `1`, a 53-byte marker crossed
+the interface in full and the host IRQ 3 count advanced from 9 to 16. The
+board DTS therefore selects `IRQ_TYPE_LEVEL_HIGH` for SIRQ 3.
+
+The factory EEPROM contains two valid Ethernet identities. OpenBMC maps
+`d0:50:99:f4:22:1e` to the dedicated `eth0` controller and
+`d0:50:99:f4:20:d0` to the NCSI `eth1` controller. During this test the
+dedicated interface had no carrier and NCSI was active, so DHCP used the
+second MAC and assigned `192.168.178.189`; a router reservation for the first
+MAC therefore did not apply. The vendor firmware used `bond0` and presented
+the first MAC as its management identity. Do not duplicate the first MAC on
+both OpenBMC interfaces: decide whether to restore a vendor-compatible bond or
+retain distinct per-interface reservations after validating simultaneous
+dedicated and NCSI links.
+
+The new `phosphor-pid-control.service` did not start during either observed
+host-on transition because `obmc-chassis-poweron@0.target` was not activated.
+Consequently it made no PWM changes and did not contribute to the boot issue.
+Closed-loop fan control remains disabled in practice until its lifecycle and
+the physical fan/PWM mapping are validated.
+
+## Fan-curve WebUI API validation
+
+The first fan-control page implementation used the deprecated broad D-Bus
+REST paths under `/xyz/openbmc_project`. Authenticated requests to both the
+TR1 curve and TR1 sensor paths returned HTTP 404 on the flashed image, so the
+page could not load even though both D-Bus objects existed.
+
+The installed bmcweb already enables OpenBMC's narrow Manager fan-data OEM
+interface. An authenticated GET of `/redfish/v1/Managers/bmc/` returned
+`Oem.OpenBmc.Fan.StepwiseControllers.TR1_Fan_Curve`, including all seven
+20-50 degree targets, 50-100 percent outputs, both 0.5 degree hysteresis
+values, the `TR1_TEMP` input, and all six fan zones. A no-op PATCH containing
+the same seven `Steps` returned HTTP 200 with Redfish Success messages. The
+standard sensor resource at
+`/redfish/v1/Chassis/ASRock_Rack_TRX40D8_2N2T/Sensors/temperature_TR1_TEMP`
+returned HTTP 200, `Health=OK`, and a live reading of 34 degrees C.
+
+The WebUI store now loads and saves the curve through those Redfish resources
+and no longer embeds a legacy D-Bus REST URL. A clean `webui-vue` recipe build
+completed all 2,458 tasks, the focused store test passed all three cases, and
+the compressed production bundle contains the Manager, TR1 curve, and sensor
+identifiers without the old `/xyz` curve path.
+
+The management address returned to `192.168.178.52` after the cable was moved
+to the dedicated BMC interface. The earlier `192.168.178.189` address was the
+separate NCSI interface and was not evidence of a lost or randomized MAC.
+
+With both interfaces linked to the same LAN, both DHCP routes initially had
+metric 1024 and an ARP request for the dedicated `.52` address was answered
+with the NCSI `d0:50:99:f4:20:d0` MAC. ICMP remained reliable while new SSH
+and HTTPS connections alternated between working and timing out. Setting
+`arp_ignore=1`, `arp_announce=2`, and a metric-100 route through dedicated
+`eth0` immediately corrected the neighbor entry to `d0:50:99:f4:22:1e`.
+Twelve consecutive SSH and HTTPS checks then completed without a failure.
+
+The board package now installs those ARP settings and systemd-networkd
+drop-ins with DHCP/RA metrics 100 for dedicated `eth0` and 2048 for NCSI
+`eth1`. The exact drop-ins were accepted in a live `/run` test. Reconfiguring
+both links released their existing leases; dedicated Ethernet immediately
+reacquired `.52`, while NCSI retained IPv6 and a link-local IPv4 address but
+had not reacquired its `.189` DHCP lease during the observation window. The
+post-update boot must therefore confirm that NCSI reacquires DHCP and remains
+a usable fallback without disturbing dedicated-interface stability.
+
+The final incremental image build attempted 6,498 tasks and all succeeded.
+The WebUI upload archive is
+`obmc-phosphor-image-trx40d8-2n2t-20260731173608.static.mtd.tar`, with SHA-256
+`8008735ea649077a05452419e6d607bae5ea125e304a0a089136eead82ddf51a`.
+Its root filesystem contains the two route-metric drop-ins, the ARP sysctl,
+and the corrected compressed fan-control WebUI bundle.
+
+## Post-flash fan and dual-interface validation
+
+After flashing the `20260731173608` archive, the BMC booted with no failed
+systemd units. Dedicated `eth0` reacquired `192.168.178.52`, its ARP entry used
+the correct `d0:50:99:f4:22:1e` MAC, and the installed sysctl values were
+`arp_ignore=1` and `arp_announce=2`. The generated routes used metric 100 for
+dedicated Ethernet. Twelve repeated SSH and HTTPS connection pairs completed
+without a failure.
+
+NCSI `eth1` linked at 100 Mbit/s and acquired IPv6, but retained only a
+link-local IPv4 address. An ad-hoc tcpdump captured DHCP Discover packets from
+`d0:50:99:f4:20:d0` and no Offer packets. A temporary
+`RequestBroadcast=yes` drop-in changed the Discover flag to Broadcast and
+produced three requests, still with no Offer. The temporary tcpdump binary,
+library, and networkd drop-in were removed. The DHCP failure is therefore not
+caused by route selection or a unicast-offer requirement; the DHCP server and
+upstream NCSI path remain to be checked.
+
+The flashed WebUI bundle contains the Manager fan endpoint,
+`TR1_Fan_Curve`, and `temperature_TR1_TEMP`, with no legacy `/xyz` curve
+path. Live Redfish returned the complete seven-point curve and a healthy
+34-degree-C TR1 reading. A no-op PATCH of the seven `Steps` returned HTTP 200,
+and a following GET confirmed the curve was unchanged. The in-app Browser was
+not available for a visual rendering check.
+
+The host was running, while `phosphor-pid-control.service` remained inactive
+because `obmc-chassis-poweron@0.target` had not been activated. It made no PWM
+writes; all six ASPEED PWM outputs remained at the fail-safe value 255. The
+live NCT6796 is an I2C device at bus 1 address `0x2d`, driven by
+`nct6775-i2c`. Its `in13_input` was 888 mV, which converts to 34 degrees C,
+and the same hwmon instance exposed two separate hardware PWM outputs at 153.
+Do not start `swampd` until the ASPEED fan/tach mapping, especially the FAN2
+pump, has been validated against the physical headers.
+
+## Live TR1 fan-control validation
+
+The fan-control page persisted the requested low-temperature curve through
+Redfish: the 20, 25, and 30 degree-C steps were all 30%, followed by 70, 80,
+90, and 100% at 35 through 50 degrees C. TR1 read 33 to 34 degrees C with
+`Health=OK`, so the expected live target was 30%.
+
+The first failure was service lifecycle rather than curve storage.
+`phosphor-pid-control.service` was enabled but inactive because this board
+never activated `obmc-chassis-poweron@0.target`. A guarded test first replaced
+all curve points with 100%, started `swampd`, and confirmed that all six
+ASPEED PWM controls remained at 255. The original user curve was then restored.
+PWM1 through PWM3 changed to 76, while FAN1 and FAN3 dropped from about 1820
+RPM to about 700 RPM. The water-temperature input remained stable.
+
+The first controller run also exposed an empty-header failure mode. FAN4
+through FAN6 have no live tach inputs, so those zones repeatedly entered and
+left fail-safe, held PWM4 through PWM6 at 255, and generated more than one
+thousand journal messages plus 129 phosphor error records. The persistent
+Entity Manager configuration in `/var/configuration/system.json` overrides
+the packaged board JSON, including across an Entity Manager restart. A live
+test therefore added `MissingIsAcceptable` only to the FAN4, FAN5, and FAN6
+controller inputs while preserving the user-edited TR1 curve.
+
+After restarting Entity Manager, the fan and TR1 sensor services, and
+`phosphor-pid-control`, all six ASPEED PWM controls settled at 76 (30%). FAN1
+and FAN3 settled near 702 and 723 RPM, respectively; TR1 remained healthy at
+34 degrees C. The controller stayed active with zero restarts. Its journal
+contained only startup discovery messages and no continuing missing-sensor
+storm, and the latest phosphor error ID remained unchanged.
+
+The board unit now starts from `multi-user.target` and no longer conflicts
+with the chassis-powered-off target. This keeps coolant control independent
+of host power-state target behavior. The board configuration marks only the
+known telemetry-free pump and empty grouped headers as missing-acceptable;
+FAN1 and FAN3 retain tach-based fail-safe protection. A new image is required
+to make the service lifecycle change persistent across BMC reboot. The unit
+also runs `trx40d8-fan-full-speed` immediately before controller startup and
+after controller shutdown. A live stop/start test confirmed that the helper
+set all six PWM channels to 255 before `swampd` resumed curve control.
+
+Focused `entity-manager` and `phosphor-pid-control` builds completed all 2,497
+tasks. The final `webui-vue`, controller, and full-image pass completed all
+6,499 tasks, including package QA. The resulting upload archive is
+`obmc-phosphor-image-trx40d8-2n2t-20260731183440.static.mtd.tar`, size
+29,726,720 bytes, SHA-256
+`a82e667cf4e759b16f4ba8574b068c6837e241fa02520f962ee27a7c1892a6da`.
+Its SquashFS contains the multi-user target symlink, the pre/post full-speed
+unit hooks and helper, and the four missing-acceptable controller lists.
+
+## Host serial-console root cause and proposed fix
+
+The host firmware's `TerminalSrc` DXE driver reads the two serial-redirection
+switches from Setup offsets `0xd3` and `0xd4`, then requires a discoverable
+ACPI PNP0501 `EFI_SERIAL_IO_PROTOCOL` device. Both switches were confirmed as
+one in the live 563-byte Setup variable after enabling console redirection for
+COM1 and COM2, but `ConOut`, `ConOutDev`, `ErrOut`, and `ErrOutDev` still held
+only GPU device paths. The BMC received no BIOS text during that boot.
+
+A host-side probe then found the OpenBMC VUART at `0x2f8`, but every AST2500
+Super I/O register at configuration ports `0x4e`/`0x4f` returned `0xff`.
+Current OpenBMC U-Boot deliberately sets SCU strap bit 20 to disable that
+interface unless `CONFIG_ASPEED_ENABLE_SUPERIO` is selected. The live BMC
+showed SCU70 `0x5111d246`, with the disable bit set. This explains why the AMI
+SioDxe driver cannot create the serial device even though redirection is
+enabled in Setup; the VUART provides bytes at the legacy UART address but does
+not emulate the Super I/O configuration protocol expected by this BIOS.
+
+The first board-scoped fix followed the existing OpenBMC ASRock E3C256D4I
+precedent by enabling the AST2500 Super I/O in U-Boot. It also replaced the
+VUART with BMC UART4 and routed physical host IO2 in both directions to UART4.
+That transport choice was subsequently disproved by the powered test below.
+
+This is not security-neutral. OpenBMC classifies the AST2500 built-in Super
+I/O as a dangerous hardware backdoor because the host can use it to read the
+BMC address space. The opt-in is therefore machine-specific and U-Boot still
+disables iLPC2AHB, P2A/PCIe BMC access, X-DMA, and LPC2AHB. A post-flash test
+must verify both working BIOS SOL and the effective isolation registers before
+this change is proposed upstream.
+
+The targeted U-Boot, kernel, and obmc-console build confirmed both Super I/O
+Kconfig symbols in the generated U-Boot configuration, produced the updated
+board DTB, and packaged only `server.ttyS3.conf` with the IO2/UART4 route. The
+following full image build attempted 6,498 tasks and all succeeded. Its WebUI
+upload archive is
+`obmc-phosphor-image-trx40d8-2n2t-20260731200643.static.mtd.tar`, size
+29,726,720 bytes, SHA-256
+`5b647ba50c280879118e2f74e3d93acd63bbac87746c7280406a2c43bd716483`.
+
+## Super I/O cold-start and SOL transport validation
+
+A BMC firmware update and software reset left SCU70 at `0x5111d246`: U-Boot
+no longer set the Super I/O disable bit, but the value written by the previous
+firmware remained latched. A complete removal of AC and standby power restarted
+the BMC with SCU70 `0x5101d246`, proving that the true power-on reset was needed
+once to clear bit 20.
+
+On the following host boot, the AST2500 configuration interface at `0x4e`/`0x4f`
+responded to its `0xa5`, `0xa5` unlock sequence. BIOS had enabled LDN 02 at
+`0x3f8`, IRQ 4 and LDN 03 at `0x2f8`, IRQ 3. Linux likewise enumerated two
+PNP0501 devices as `ttyS0` and `ttyS1`. This validates the U-Boot Super I/O
+change and the original `TerminalSrc` diagnosis.
+
+The UART4/IO2 transport did not carry data. During a controlled Linux write,
+the host `ttyS1` transmit count advanced by 16 bytes while BMC `ttyS3` remained
+at zero received bytes. Sweeping every UART4 receive source exposed by the
+ASPEED routing driver also produced zero bytes, and no BIOS or POST output was
+captured. By contrast, the earlier VUART test carried a complete marker once
+SIRQ 3 used active-high polarity. The board therefore keeps Super I/O enabled
+for BIOS discovery but restores VUART at `0x2f8`, SIRQ 3 as the SOL data path.
+The DTS specifies `IRQ_TYPE_LEVEL_HIGH` explicitly instead of relying on the
+driver's default active-low SIRQ polarity.
+
+Targeted `linux-aspeed` and clean `obmc-console` builds succeeded. The generated
+DTB contains `aspeed,lpc-io-reg = <0x2f8>` and
+`aspeed,lpc-interrupts = <3 IRQ_TYPE_LEVEL_HIGH>`, while the packaged console
+configuration provides only `server.ttyVUART0.conf`. The subsequent full image
+build attempted 6,498 tasks and all succeeded. Its WebUI upload archive is
+`obmc-phosphor-image-trx40d8-2n2t-20260731210414.static.mtd.tar`, size
+29,726,720 bytes, SHA-256
+`203f9f24d54364651a473c13207b8bf8dd1eb6cb9d270a54fd8fe3d9d943b66a`.
+
+That image was then installed and validated after the complete AC/standby
+power cycle. SCU70 remained `0x5101d246`, `obmc-console@ttyVUART0` was active,
+and the live VUART reported LPC address `0x2f8`, SIRQ 3, and active-high
+polarity. A console client attached before the host reset captured the AMI
+banner, BIOS `L1.19F`, POST-code progression, the UEFI setup prompt, and the
+Linux EFI stub. The VUART receive counter increased from 0 to 3,604 bytes and
+the host subsequently returned over SSH. This is the first end-to-end proof
+that the flashed OpenBMC image carries BIOS SOL across a cold-started AST2500.
+
+The same boot also disproved the current RGB service's ownership assumption.
+The BMC-side `ram-rgb-off.service` remained active, but reads of mux `0x71`
+NACKed on every exposed I2C adapter while the host was on. The legacy Ubuntu
+helper also failed because OpenBMC does not implement the vendor firmware's
+IPMI Master Write-Read command `0x52`. The BMC-native implementation therefore
+still needs the vendor bus-ownership or hardware-selector transition to be
+identified and must not yet be described as validated across a cold boot. The
+obsolete Ubuntu `ram-rgb-off.service` was disabled after this result so that
+the unsupported vendor command is no longer retried from the host.
+
+Follow-up reverse engineering identified that transition in the vendor
+`libipmipdk.so.6.23.0`. `ASRR_QuickSwithcTask` uses GPIO-handle slot 7
+(`set_gpio_data_high`) and slot 8 (`set_gpio_data_low`) on AST GPIO 75 (J3),
+while vendor platform initialization first configures J3 as a low output. On
+the live OpenBMC image, holding otherwise-unused GPIO 75 high made mux `0x71`
+immediately readable on I2C7; all 20 consecutive probes returned its current
+selection byte `0x07`. With the route held high, the BMC-native utility
+validated each ENE signature, programmed both channels, and independently
+read register `0x8021` back as `0x00` on channels `0x01` and `0x02`. Releasing
+the GPIO returned it to its original input state.
+
+The service now reproduces this quick-switch operation for each programming
+attempt and releases the route afterward. Monitor mode waits for the standard
+OpenBMC host state to become `Running`, programs once, and re-arms whenever the
+host state changes. This avoids permanently taking the management bus away
+from host firmware while still removing the former Ubuntu/IPMI dependency.
+
+The candidate service was exercised live in both one-shot and monitor modes.
+Each path programmed both banks, returned success, and left GPIO 75 as an
+unused input after the transaction. The targeted `ram-rgb-off` build attempted
+1,096 tasks and passed package QA and SPDX generation. A subsequent j64 image
+build attempted 6,516 tasks and all succeeded. The resulting WebUI/Redfish
+archive is
+`obmc-phosphor-image-trx40d8-2n2t-20260731233117.static.mtd.tar`, size
+29,736,960 bytes, SHA-256
+`0e63eaab1f08c24a1134651b57de7fa75bb87ce74e1458d88b9cccd5d037b92f`.
+The script extracted from that image has SHA-256
+`36153768e5fade95713c147788d9fd0d4b9afbd2a275c8e71463f195aad8487a`,
+identical to the live-tested candidate.
+
+The installed image was then tested across the controller reset boundary,
+rather than with a warm host reboot. The RGB service was stopped, the host
+reached chassis `PowerState.Off`, and the main rails remained off for 30
+seconds before power-on. Before restarting the service, independent reads of
+ENE register `0x8021` returned reset mode `0x05` on both mux channels. The
+installed service completed both banks after the host returned to `Running`;
+independent post-service reads returned `0x00` on both channels. GPIO 75 was
+again an unused input, the service remained active, and Ubuntu returned over
+SSH. This proves the BMC-native path reapplies Off mode after a real DIMM
+controller reset; persistence across a warm reboot is not being mistaken for
+service operation.
+
+The cold-boot fan discrepancy was an upgrade-overlay problem rather than a
+controller defect. The new SquashFS board JSON contained
+`MissingIsAcceptable` for FAN4 through FAN6, but an older file at
+`/run/initramfs/rw/cow/usr/share/entity-manager/configurations/asrock/`
+masked it. Entity Manager therefore published the property only for FAN2 and
+PWM4 through PWM6 remained at 255. The old upper file was copied to
+`/var/lib/entity-manager-backups/trx40d8-2n2t.pre-upgrade-20260731.json`, then
+replaced with the verified SquashFS configuration. After Entity Manager had
+reprobed the board and `phosphor-pid-control` restarted, its startup dump marked
+the telemetry-free fan/PWM pairs with `?`, all six zones left fail-safe, and
+all six ASPEED PWM values settled at 153 (60%) for the live 32-degree-C TR1
+reading. Redfish exposed 33 sensors and a no-op WebUI-equivalent fan-curve
+PATCH returned HTTP 200.
+
+The source now includes `trx40d8-config-migration.service` to handle this
+boundary on later upgrades. A schema-version change makes it capture the four
+writable TR1 curve properties, retain the first old upper JSON for recovery,
+overwrite the existing upper inode with the new image JSON, restart Entity
+Manager, and restore the user curve before fan control starts. It deliberately
+overwrites the inode rather than unlinking it: the live OverlayFS retained a
+stale merged dentry after a direct unlink until the corrected upper file was
+explicitly rebound.
+
+The targeted j64 build of `trx40d8-config-migration`, `phosphor-pid-control`,
+and `packagegroup-asrock-apps` attempted 3,007 tasks and all succeeded. After
+the recovery-copy addition, the migration package was rebuilt independently;
+all 2,388 tasks succeeded, including package QA, IPK generation, and SPDX
+generation. The package contains its executable, schema marker, systemd unit,
+and enable preset, and `packagegroup-asrock-apps-system` depends on it. The
+build host's AppArmor user-namespace restriction was disabled only while
+BitBake ran and restored to its original value afterward.
+
+A final live check found no failed BMC units. Entity Manager, fan control, and
+the VUART console service were active; Redfish exposed 33 sensors and reported
+`TR1 TEMP` healthy at 34 degrees C. All six PWM outputs remained at 153 of 255
+(60 percent), and the lower, upper, and merged board JSON files had the same
+SHA-256 digest.
+
+## KVM framebuffer-selection investigation
+
+The flashed OpenBMC image's video path was validated end to end. `obmc-ikvm`
+used `/dev/video0`, the mainline ASPEED video driver reported `HOST VGA`,
+signal lock, 1024x768 input, and approximately 29 frames per second, and the
+Web UI remained connected. Chrome DevTools captured visible AMI POST content
+at 720x400 and 800x600 on multiple reboots. The canvas changed to a completely
+black 1024x768 frame only when Ubuntu initialized its display drivers.
+
+The host exposed NVIDIA `01:00.0` and ASPEED `46:00.0`. Linux registered
+`simpledrmdrmfb` as `fb0` below the NVIDIA PCI device and `astdrmfb` as `fb1`.
+All virtual consoles initially mapped to `fb0`; the ASPEED CRTC and its
+1024x768 framebuffer were active but contained no console. Temporarily mapping
+VT1 to `fb1` with `FBIOPUT_CON2FBMAP` immediately made the Ubuntu login prompt
+visible in OpenBMC KVM. This proves that the ASPEED capture hardware, kernel
+driver, `obmc-ikvm`, WebSocket, and browser canvas are all working.
+
+IFR extraction and IDA analysis of BIOS L1.19F explain why the firmware setting
+appears contradictory. `Primary Graphics Adapter` is `Setup[0x1d5]` and was
+correctly set to `Onboard VGA`; `Onboard VGA` is `Setup[0x1d4]` and was enabled.
+Later, AMI's GOP policy enumerates GOP handles and writes an
+`AmiGopOutputDp` device path. Its hidden `Output Select` value is
+`Setup[0x107]`. The firmware-generated setup data listed only `GPU Board` and
+`NVIDIA GPU UEFI Driver`, so the NVIDIA GOP still supplied Linux's EFI
+framebuffer after ASPEED had displayed POST.
+
+Enabling CSM and setting `Launch Video OpROM Policy` to `Do not launch` was
+tested as a firmware-only workaround. The host remained in early POST with an
+unlocked 640x480 input and no network, so both settings were reverted before a
+forced restart. The baseline settings and normal boot were recovered; this is
+not a viable workaround.
+
+For the Ubuntu build host, the proven persistent workaround is an isolated
+GRUB drop-in at `/etc/default/grub.d/99-aspeed-kvm.cfg`:
+
+```sh
+GRUB_CMDLINE_LINUX_DEFAULT="${GRUB_CMDLINE_LINUX_DEFAULT:+${GRUB_CMDLINE_LINUX_DEFAULT} }fbcon=map:1"
+```
+
+After `update-grub` and a reboot, `/proc/cmdline` contained `fbcon=map:1`, VT1
+through VT3 mapped to `fb1`, and Chrome DevTools captured the live Ubuntu
+console at 1024x768. This host setting is deliberately not part of the
+OpenBMC image. A host-independent firmware repair would require the BIOS to
+publish/select an ASPEED UEFI GOP (or otherwise leave ASPEED as the EFI boot
+framebuffer); OpenBMC cannot redirect or capture a framebuffer owned by the
+discrete NVIDIA device.

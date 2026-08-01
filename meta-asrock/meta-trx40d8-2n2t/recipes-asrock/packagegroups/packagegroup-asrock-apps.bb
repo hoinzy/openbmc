@@ -24,11 +24,15 @@ SUMMARY:${PN}-system = "ASRock System"
 RDEPENDS:${PN}-system = " \
         phosphor-host-postd \
         phosphor-post-code-manager \
+        phosphor-pid-control \
         phosphor-power-regulators \
         biosconfig-manager \
         phosphor-ipmi-blobs \
         ami-host-interface \
         ami-host-inventory \
         ram-rgb-off \
+        trx40d8-network-preference \
+        trx40d8-config-migration \
+        trx40d8-tr1-sensor \
         virtual-media \
         "

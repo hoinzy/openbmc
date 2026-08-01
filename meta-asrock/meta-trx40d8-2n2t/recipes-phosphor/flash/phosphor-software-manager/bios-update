@@ -1,0 +1,8 @@
+# The vendor firmware accesses the host flash through the AST2500 SPI1
+# controller without a board-specific GPIO hook.  Keep the array explicit so
+# the common updater can share its attach and restore path with other boards.
+BIOS_UPDATE_PREP_GPIOS=()
+BIOS_UPDATE_MANUAL_BIND=true
+BIOS_UPDATE_MAGIC_OFFSET=$((0x20000))
+BIOS_UPDATE_MAGIC=aa55aa55
+BIOS_UPDATE_SIZE=$((16 << 20))

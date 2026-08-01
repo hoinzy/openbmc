@@ -12,6 +12,11 @@ set -u
 bus=7
 mux_address=0x71
 ene_address=0x77
+# The vendor firmware calls GPIO J3 (AST GPIO 75) its "quick switch".  A high
+# level routes the DIMM management bus to the BMC; low returns it to the host.
+quick_switch_line=75
+quick_switch_chip=
+quick_switch_pid=
 attempts=1
 monitor=false
 retry_delay=1
@@ -61,6 +66,46 @@ i2c_read()
 i2c_write()
 {
     i2ctransfer -y "$bus" "$@" >/dev/null 2>&1
+}
+
+find_quick_switch_chip()
+{
+    quick_switch_chip=$(gpiodetect 2>/dev/null |
+        awk '$2 == "[1e780000.gpio]" { print $1; exit }')
+    [ -n "$quick_switch_chip" ]
+}
+
+acquire_dimm_bus()
+{
+    [ -z "$quick_switch_pid" ] || return 0
+    [ -n "$quick_switch_chip" ] || find_quick_switch_chip || return 1
+
+    gpioset -m signal "$quick_switch_chip" \
+        "$quick_switch_line=1" >/dev/null 2>&1 &
+    quick_switch_pid=$!
+
+    # Allow the hardware quick switch to settle and make sure gpioset retained
+    # ownership of the otherwise unclaimed line.
+    sleep 1
+    if ! kill -0 "$quick_switch_pid" 2>/dev/null; then
+        wait "$quick_switch_pid" 2>/dev/null || true
+        quick_switch_pid=
+        return 1
+    fi
+}
+
+release_dimm_bus()
+{
+    [ -n "$quick_switch_pid" ] || return 0
+    kill "$quick_switch_pid" 2>/dev/null || true
+    wait "$quick_switch_pid" 2>/dev/null || true
+    quick_switch_pid=
+
+    # Requesting the line once as an input restores the board's normal host
+    # route.  Merely closing gpioset leaves the AST2500 direction latch at its
+    # last output setting.
+    gpioget "$quick_switch_chip" "$quick_switch_line" \
+        >/dev/null 2>&1 || true
 }
 
 read_dimm_channel()
@@ -155,35 +200,69 @@ turn_off_rgb()
     restore_dimm_channel
 }
 
+route_and_turn_off_rgb()
+{
+    acquire_dimm_bus || return 1
+    turn_off_rgb
+    result=$?
+    release_dimm_bus
+    return "$result"
+}
+
+current_host_state()
+{
+    busctl get-property \
+        xyz.openbmc_project.State.Host \
+        /xyz/openbmc_project/state/host0 \
+        xyz.openbmc_project.State.Host \
+        CurrentHostState 2>/dev/null |
+        sed -n 's/^s "\(.*\)"$/\1/p'
+}
+
 terminate()
 {
     restore_dimm_channel
+    release_dimm_bus
     exit 0
 }
 
-trap restore_dimm_channel EXIT
+cleanup()
+{
+    restore_dimm_channel
+    release_dimm_bus
+}
+
+trap cleanup EXIT
 trap terminate HUP INT TERM
 
 if [ "$monitor" = true ]; then
     programmed=false
     unavailable_logged=false
+    previous_host_state=
 
     while true; do
-        if [ "$programmed" = true ]; then
-            # A NACK marks the host-ownership transition.  Re-arm the writer so
-            # the next interval in which the BMC owns the DIMM bus is handled.
-            if ! read_dimm_channel >/dev/null; then
-                programmed=false
-                unavailable_logged=false
-            fi
-        elif turn_off_rgb; then
+        host_state=$(current_host_state)
+        [ -n "$host_state" ] || host_state=unknown
+
+        if [ "$host_state" != "$previous_host_state" ]; then
+            programmed=false
+            unavailable_logged=false
+            previous_host_state=$host_state
+        fi
+
+        if [ "$host_state" = \
+             "xyz.openbmc_project.State.Host.HostState.Running" ] &&
+           [ "$programmed" = false ] && route_and_turn_off_rgb; then
             logger -t trx40d8-ram-rgb-off \
-                "disabled both ENE DRAM RGB banks and verified Off mode"
+                "routed the DIMM bus to the BMC, disabled both ENE DRAM RGB banks, and verified Off mode"
             programmed=true
             unavailable_logged=false
-        elif [ "$unavailable_logged" = false ]; then
+        elif [ "$host_state" = \
+               "xyz.openbmc_project.State.Host.HostState.Running" ] &&
+             [ "$programmed" = false ] &&
+             [ "$unavailable_logged" = false ]; then
             logger -t trx40d8-ram-rgb-off \
-                "waiting for BMC ownership of the ENE DRAM RGB bus"
+                "unable to route or program the ENE DRAM RGB bus; retrying"
             unavailable_logged=true
         fi
 
@@ -193,9 +272,9 @@ fi
 
 attempt=1
 while [ "$attempt" -le "$attempts" ]; do
-    if turn_off_rgb; then
+    if route_and_turn_off_rgb; then
         logger -t trx40d8-ram-rgb-off \
-            "disabled both ENE DRAM RGB banks and verified Off mode"
+            "routed the DIMM bus to the BMC, disabled both ENE DRAM RGB banks, and verified Off mode"
         exit 0
     fi
 
@@ -205,9 +284,8 @@ while [ "$attempt" -le "$attempts" ]; do
     attempt=$((attempt + 1))
 done
 
-# Exit 2 distinguishes an unavailable host-owned bus from a programming error
-# for manual callers.  The systemd service uses monitor mode and keeps waiting
-# for the next interval in which the BMC owns this bus.
+# Exit 2 distinguishes an unavailable route from a programming error for
+# manual callers.  The systemd service retries while the host is Running.
 logger -t trx40d8-ram-rgb-off \
-    "ENE DRAM RGB bus unavailable after $attempts attempts; will retry on the next power transition"
+    "ENE DRAM RGB bus unavailable after $attempts attempts"
 exit 2

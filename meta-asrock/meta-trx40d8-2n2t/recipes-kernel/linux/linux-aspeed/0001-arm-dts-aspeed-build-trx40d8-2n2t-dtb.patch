@@ -6,14 +6,15 @@ Subject: [PATCH] ARM: dts: aspeed: add ASRock Rack TRX40D8-2N2T
 Add the board device tree and its AST2500 DTB target. The board reuses the
 X570D4U wiring where it has been verified, but moves the board EEPROM from
 I2C7 to I2C1. It also associates the existing reserved framebuffer memory
-with the GFX controller, which is required by the ASPEED DRM driver.
+with the GFX controller, configures the BMC VUART for host COM2, and exposes
+the host BIOS flash through the AST2500 SPI1 controller.
 
 Upstream-Status: Pending
 Signed-off-by: Till Heinzerling <1684934+hoinzy@users.noreply.github.com>
 ---
  arch/arm/boot/dts/aspeed/Makefile                         |  1 +
- .../dts/aspeed/aspeed-bmc-asrock-trx40d8-2n2t.dts         | 49 +++++++++++++++++
- 2 files changed, 50 insertions(+)
+ .../dts/aspeed/aspeed-bmc-asrock-trx40d8-2n2t.dts         | 71 +++++++++++++++++++++
+ 2 files changed, 72 insertions(+)
 
 diff --git a/arch/arm/boot/dts/aspeed/Makefile b/arch/arm/boot/dts/aspeed/Makefile
 index 371e5c0d0ce7..f76c9b609d8f 100644
@@ -32,7 +33,7 @@ new file mode 100644
 index 000000000000..000000000000
 --- /dev/null
 +++ b/arch/arm/boot/dts/aspeed/aspeed-bmc-asrock-trx40d8-2n2t.dts
-@@ -0,0 +1,51 @@
+@@ -0,0 +1,71 @@
 +// SPDX-License-Identifier: GPL-2.0+
 +/*
 + * Device tree for the ASRock Rack TRX40D8-2N2T.
@@ -42,10 +43,25 @@ index 000000000000..000000000000
 + * and the NCT6796D hardware-monitoring interface.
 + */
 +#include "aspeed-bmc-asrock-x570d4u.dts"
++#include <dt-bindings/interrupt-controller/irq.h>
 +
 +/ {
 +	model = "ASRock Rack TRX40D8-2N2T BMC";
 +	compatible = "asrock,trx40d8-2n2t-bmc", "aspeed,ast2500";
++};
++
++&spi1 {
++	status = "okay";
++	aspeed,manual-bind;
++	pinctrl-names = "default";
++	pinctrl-0 = <&pinctrl_spi1_default>;
++
++	flash@0 {
++		status = "okay";
++		label = "bios";
++		m25p,fast-read;
++		spi-max-frequency = <33000000>;
++	};
 +};
 +
 +&i2c7 {
@@ -79,6 +95,12 @@ index 000000000000..000000000000
 +			};
 +		};
 +	};
++};
++
++&vuart {
++	status = "okay";
++	aspeed,lpc-io-reg = <0x2f8>;
++	aspeed,lpc-interrupts = <3 IRQ_TYPE_LEVEL_HIGH>;
 +};
 +
 +&gfx {

@@ -15,7 +15,7 @@ inherit systemd
 SYSTEMD_SERVICE:${PN} = "ram-rgb-off.service"
 SYSTEMD_AUTO_ENABLE:${PN} = "enable"
 
-RDEPENDS:${PN} = "i2c-tools"
+RDEPENDS:${PN} = "i2c-tools libgpiod-tools"
 
 do_install() {
     install -d ${D}${sbindir}

@@ -1,0 +1,66 @@
+From 4d66e4c75f4a91741399f48cbe0dbb705639e566 Mon Sep 17 00:00:00 2001
+From: Till Heinzerling <1684934+hoinzy@users.noreply.github.com>
+Date: Sat, 1 Aug 2026 11:00:00 +0200
+Subject: [PATCH] spi: aspeed: support manual host-flash binding
+
+Some BMCs share an SPI flash with a running host. Applying the SPI pinmux
+during normal driver probing can take flash ownership away from the host.
+
+Allow a board to suppress automatic probing with an aspeed,manual-bind
+property. An explicit driver override followed by a sysfs bind remains
+available to a userspace update service after it has verified that the host
+is off. Unbinding the driver releases the default pinctrl state again.
+
+Upstream-Status: Pending
+Signed-off-by: Till Heinzerling <1684934+hoinzy@users.noreply.github.com>
+---
+ .../bindings/spi/aspeed,ast2600-fmc.yaml       | 8 ++++++++
+ drivers/spi/spi-aspeed-smc.c                  | 6 ++++++
+ 2 files changed, 14 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/spi/aspeed,ast2600-fmc.yaml b/Documentation/devicetree/bindings/spi/aspeed,ast2600-fmc.yaml
+index 37285827c243..ac8c20b322c9 100644
+--- a/Documentation/devicetree/bindings/spi/aspeed,ast2600-fmc.yaml
++++ b/Documentation/devicetree/bindings/spi/aspeed,ast2600-fmc.yaml
+@@ -35,6 +35,14 @@ properties:
+   interrupts:
+     maxItems: 1
+ 
++  aspeed,manual-bind:
++    type: boolean
++    description:
++      Prevent automatic driver probing so the controller pinmux remains
++      released. This is intended for a host firmware flash shared with a BMC.
++      Userspace may set the platform device driver_override and bind the
++      controller explicitly after verifying that the host is off.
++
+ required:
+   - compatible
+   - reg
+
+diff --git a/drivers/spi/spi-aspeed-smc.c b/drivers/spi/spi-aspeed-smc.c
+index 95d18a178fb0..c29bfc7c267c 100644
+--- a/drivers/spi/spi-aspeed-smc.c
++++ b/drivers/spi/spi-aspeed-smc.c
+@@ -11,6 +11,7 @@
+ #include <linux/of.h>
+ #include <linux/of_platform.h>
+ #include <linux/platform_device.h>
++#include <linux/property.h>
+ #include <linux/spi/spi.h>
+ #include <linux/spi/spi-mem.h>
+ 
+@@ -963,6 +963,11 @@ static int aspeed_spi_probe(struct platform_device *pdev)
+ 	struct resource *res;
+ 	int ret;
+ 
++	if (device_property_read_bool(dev, "aspeed,manual-bind") &&
++	    !device_has_driver_override(dev))
++		return dev_err_probe(dev, -ENODEV,
++				     "manual driver binding required\n");
++
+ 	data = of_device_get_match_data(&pdev->dev);
+ 	if (!data)
+ 		return -ENODEV;
+-- 
+2.50.1

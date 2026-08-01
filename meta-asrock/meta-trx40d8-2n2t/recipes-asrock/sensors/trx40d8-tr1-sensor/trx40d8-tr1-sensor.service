@@ -1,0 +1,14 @@
+[Unit]
+Description=Publish the TR1 water temperature sensor
+Requires=xyz.openbmc_project.externalsensor.service
+After=xyz.openbmc_project.externalsensor.service
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/trx40d8-tr1-sensor
+Restart=always
+RestartSec=5
+TimeoutStopSec=5
+
+[Install]
+WantedBy=multi-user.target

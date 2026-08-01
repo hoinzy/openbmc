@@ -1,0 +1,17 @@
+[Unit]
+Description=TRX40D8 fan control
+Wants=trx40d8-config-migration.service trx40d8-tr1-sensor.service xyz.openbmc_project.fansensor.service
+After=trx40d8-config-migration.service trx40d8-tr1-sensor.service xyz.openbmc_project.fansensor.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStartPre=/usr/bin/trx40d8-fan-full-speed
+ExecStart=/usr/bin/swampd
+ExecReload=/bin/kill -HUP $MAINPID
+ExecStopPost=/usr/bin/trx40d8-fan-full-speed
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

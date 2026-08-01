@@ -1,0 +1,15 @@
+[Unit]
+Description=Migrate persistent TRX40D8 board configuration
+Wants=xyz.openbmc_project.EntityManager.service
+After=xyz.openbmc_project.EntityManager.service
+Before=phosphor-pid-control.service
+ConditionPathExists=/run/initramfs/ro/usr/share/entity-manager/configurations/asrock/trx40d8-2n2t.json
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/trx40d8-config-migration
+TimeoutStartSec=210
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

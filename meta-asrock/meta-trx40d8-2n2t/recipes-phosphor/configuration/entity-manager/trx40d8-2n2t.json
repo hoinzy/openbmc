@@ -166,6 +166,49 @@
             "Type": "ADC"
         },
         {
+            "Name": "FAN1 connector",
+            "Pwm": 0,
+            "Status": "enabled",
+            "Tachs": [0],
+            "Type": "IntelFanConnector"
+        },
+        {
+            "Name": "FAN2 connector",
+            "Pwm": 1,
+            "Status": "enabled",
+            "Tachs": [1],
+            "Type": "IntelFanConnector"
+        },
+        {
+            "Name": "FAN3 connector",
+            "Pwm": 2,
+            "Status": "enabled",
+            "Tachs": [2],
+            "Type": "IntelFanConnector"
+        },
+        {
+            "Name": "FAN4 connector",
+            "Pwm": 3,
+            "Status": "enabled",
+            "Tachs": [4, 11],
+            "Type": "IntelFanConnector"
+        },
+        {
+            "Name": "FAN5 connector",
+            "Pwm": 5,
+            "Status": "enabled",
+            "Tachs": [5, 12],
+            "Type": "IntelFanConnector"
+        },
+        {
+            "Name": "FAN6 connector",
+            "Pwm": 4,
+            "Status": "enabled",
+            "Tachs": [6, 13],
+            "Type": "IntelFanConnector"
+        },
+        {
+            "BindConnector": "FAN1 connector",
             "Index": 0,
             "Name": "FAN1_1",
             "PowerState": "On",
@@ -175,6 +218,17 @@
             "Type": "AspeedFan"
         },
         {
+            "BindConnector": "FAN2 connector",
+            "Index": 1,
+            "Name": "FAN2_1",
+            "PowerState": "On",
+            "Thresholds": [
+                {"Direction": "less than", "Name": "lower critical", "Severity": 1, "Value": 100}
+            ],
+            "Type": "AspeedFan"
+        },
+        {
+            "BindConnector": "FAN3 connector",
             "Index": 2,
             "Name": "FAN3_1",
             "PowerState": "On",
@@ -184,13 +238,261 @@
             "Type": "AspeedFan"
         },
         {
+            "BindConnector": "FAN4 connector",
+            "Index": 4,
+            "Name": "FAN4_1",
+            "PowerState": "On",
+            "Thresholds": [
+                {"Direction": "less than", "Name": "lower critical", "Severity": 1, "Value": 100}
+            ],
+            "Type": "AspeedFan"
+        },
+        {
+            "BindConnector": "FAN4 connector",
+            "Index": 11,
+            "Name": "FAN4_2",
+            "PowerState": "On",
+            "Thresholds": [
+                {"Direction": "less than", "Name": "lower critical", "Severity": 1, "Value": 100}
+            ],
+            "Type": "AspeedFan"
+        },
+        {
+            "BindConnector": "FAN5 connector",
+            "Index": 5,
+            "Name": "FAN5_1",
+            "PowerState": "On",
+            "Thresholds": [
+                {"Direction": "less than", "Name": "lower critical", "Severity": 1, "Value": 100}
+            ],
+            "Type": "AspeedFan"
+        },
+        {
+            "BindConnector": "FAN5 connector",
+            "Index": 12,
+            "Name": "FAN5_2",
+            "PowerState": "On",
+            "Thresholds": [
+                {"Direction": "less than", "Name": "lower critical", "Severity": 1, "Value": 100}
+            ],
+            "Type": "AspeedFan"
+        },
+        {
+            "BindConnector": "FAN6 connector",
+            "Index": 6,
+            "Name": "FAN6_1",
+            "PowerState": "On",
+            "Thresholds": [
+                {"Direction": "less than", "Name": "lower critical", "Severity": 1, "Value": 100}
+            ],
+            "Type": "AspeedFan"
+        },
+        {
+            "BindConnector": "FAN6 connector",
+            "Index": 13,
+            "Name": "FAN6_2",
+            "PowerState": "On",
+            "Thresholds": [
+                {"Direction": "less than", "Name": "lower critical", "Severity": 1, "Value": 100}
+            ],
+            "Type": "AspeedFan"
+        },
+        {
+            "Class": "fan",
+            "FFGainCoefficient": 1.0,
+            "FFOffCoefficient": 0.0,
+            "ICoefficient": 0.0,
+            "ILimitMax": 0.0,
+            "ILimitMin": 0.0,
+            "Inputs": ["FAN1_1"],
+            "Name": "FAN1 Control",
+            "NegativeHysteresis": 0.0,
+            "OutLimitMax": 100.0,
+            "OutLimitMin": 30.0,
+            "Outputs": ["Pwm_1"],
+            "PCoefficient": 0.0,
+            "PositiveHysteresis": 0.0,
+            "SlewNeg": 0.0,
+            "SlewPos": 0.0,
+            "Type": "Pid",
+            "Zones": ["FAN1 Zone"]
+        },
+        {
+            "Class": "fan",
+            "FFGainCoefficient": 1.0,
+            "FFOffCoefficient": 0.0,
+            "ICoefficient": 0.0,
+            "ILimitMax": 0.0,
+            "ILimitMin": 0.0,
+            "Inputs": ["FAN2_1"],
+            "MissingIsAcceptable": ["FAN2_1"],
+            "Name": "FAN2 Pump Control",
+            "NegativeHysteresis": 0.0,
+            "OutLimitMax": 100.0,
+            "OutLimitMin": 30.0,
+            "Outputs": ["Pwm_2"],
+            "PCoefficient": 0.0,
+            "PositiveHysteresis": 0.0,
+            "SlewNeg": 0.0,
+            "SlewPos": 0.0,
+            "Type": "Pid",
+            "Zones": ["FAN2 Zone"]
+        },
+        {
+            "Class": "fan",
+            "FFGainCoefficient": 1.0,
+            "FFOffCoefficient": 0.0,
+            "ICoefficient": 0.0,
+            "ILimitMax": 0.0,
+            "ILimitMin": 0.0,
+            "Inputs": ["FAN3_1"],
+            "Name": "FAN3 Control",
+            "NegativeHysteresis": 0.0,
+            "OutLimitMax": 100.0,
+            "OutLimitMin": 30.0,
+            "Outputs": ["Pwm_3"],
+            "PCoefficient": 0.0,
+            "PositiveHysteresis": 0.0,
+            "SlewNeg": 0.0,
+            "SlewPos": 0.0,
+            "Type": "Pid",
+            "Zones": ["FAN3 Zone"]
+        },
+        {
+            "Class": "fan",
+            "FFGainCoefficient": 1.0,
+            "FFOffCoefficient": 0.0,
+            "ICoefficient": 0.0,
+            "ILimitMax": 0.0,
+            "ILimitMin": 0.0,
+            "Inputs": ["FAN4_1", "FAN4_2"],
+            "MissingIsAcceptable": ["FAN4_1", "FAN4_2"],
+            "Name": "FAN4 Control",
+            "NegativeHysteresis": 0.0,
+            "OutLimitMax": 100.0,
+            "OutLimitMin": 30.0,
+            "Outputs": ["Pwm_4"],
+            "PCoefficient": 0.0,
+            "PositiveHysteresis": 0.0,
+            "SlewNeg": 0.0,
+            "SlewPos": 0.0,
+            "Type": "Pid",
+            "Zones": ["FAN4 Zone"]
+        },
+        {
+            "Class": "fan",
+            "FFGainCoefficient": 1.0,
+            "FFOffCoefficient": 0.0,
+            "ICoefficient": 0.0,
+            "ILimitMax": 0.0,
+            "ILimitMin": 0.0,
+            "Inputs": ["FAN5_1", "FAN5_2"],
+            "MissingIsAcceptable": ["FAN5_1", "FAN5_2"],
+            "Name": "FAN5 Control",
+            "NegativeHysteresis": 0.0,
+            "OutLimitMax": 100.0,
+            "OutLimitMin": 30.0,
+            "Outputs": ["Pwm_6"],
+            "PCoefficient": 0.0,
+            "PositiveHysteresis": 0.0,
+            "SlewNeg": 0.0,
+            "SlewPos": 0.0,
+            "Type": "Pid",
+            "Zones": ["FAN5 Zone"]
+        },
+        {
+            "Class": "fan",
+            "FFGainCoefficient": 1.0,
+            "FFOffCoefficient": 0.0,
+            "ICoefficient": 0.0,
+            "ILimitMax": 0.0,
+            "ILimitMin": 0.0,
+            "Inputs": ["FAN6_1", "FAN6_2"],
+            "MissingIsAcceptable": ["FAN6_1", "FAN6_2"],
+            "Name": "FAN6 Control",
+            "NegativeHysteresis": 0.0,
+            "OutLimitMax": 100.0,
+            "OutLimitMin": 30.0,
+            "Outputs": ["Pwm_5"],
+            "PCoefficient": 0.0,
+            "PositiveHysteresis": 0.0,
+            "SlewNeg": 0.0,
+            "SlewPos": 0.0,
+            "Type": "Pid",
+            "Zones": ["FAN6 Zone"]
+        },
+        {
+            "Class": "temp",
+            "Inputs": ["TR1_TEMP"],
+            "Name": "TR1 Fan Curve",
+            "NegativeHysteresis": 0.5,
+            "Output": [50.0, 55.0, 60.0, 70.0, 80.0, 90.0, 100.0],
+            "PositiveHysteresis": 0.5,
+            "Reading": [20.0, 25.0, 30.0, 35.0, 40.0, 45.0, 50.0],
+            "Type": "Stepwise",
+            "Zones": [
+                "FAN1 Zone",
+                "FAN2 Zone",
+                "FAN3 Zone",
+                "FAN4 Zone",
+                "FAN5 Zone",
+                "FAN6 Zone"
+            ]
+        },
+        {
+            "FailSafePercent": 100.0,
+            "MinThermalOutput": 30.0,
+            "Name": "FAN1 Zone",
+            "Type": "Pid.Zone"
+        },
+        {
+            "FailSafePercent": 100.0,
+            "MinThermalOutput": 30.0,
+            "Name": "FAN2 Zone",
+            "Type": "Pid.Zone"
+        },
+        {
+            "FailSafePercent": 100.0,
+            "MinThermalOutput": 30.0,
+            "Name": "FAN3 Zone",
+            "Type": "Pid.Zone"
+        },
+        {
+            "FailSafePercent": 100.0,
+            "MinThermalOutput": 30.0,
+            "Name": "FAN4 Zone",
+            "Type": "Pid.Zone"
+        },
+        {
+            "FailSafePercent": 100.0,
+            "MinThermalOutput": 30.0,
+            "Name": "FAN5 Zone",
+            "Type": "Pid.Zone"
+        },
+        {
+            "FailSafePercent": 100.0,
+            "MinThermalOutput": 30.0,
+            "Name": "FAN6 Zone",
+            "Type": "Pid.Zone"
+        },
+        {
+            "EntityId": 30,
+            "EntityInstance": 1,
+            "MaxValue": 145.0,
+            "MinValue": -109.0,
+            "Name": "TR1_TEMP",
+            "Timeout": 10.0,
+            "Type": "ExternalSensor",
+            "Units": "DegreesC"
+        },
+        {
             "Bus": 1,
             "Address": "0x2d",
-            "Labels": ["TSI0_TEMP", "TSI1_TEMP"],
-            "Name": "NCT6796D_Temp1",
+            "Labels": ["SYSTIN", "AUXTIN1", "TSI0_TEMP", "TSI1_TEMP"],
+            "Name": "MB_TEMP",
             "Name1": "NCT6796D_Temp2",
             "Name2": "NCT6796D_Temp3",
-            "Name3": "NCT6796D_Temp4",
+            "Name3": "CARD_SIDE_TEMP",
             "Name4": "NCT6796D_Temp5",
             "Name5": "NCT6796D_Temp6",
             "Name6": "NCT6796D_Temp7",
@@ -199,7 +501,7 @@
             "Name9": "NCT6796D_Temp10",
             "Name10": "NCT6796D_Temp11",
             "Name11": "NCT6796D_Temp12",
-            "Name12": "NCT6796D_TSI0_TEMP",
+            "Name12": "CPU1_TEMP",
             "Name13": "NCT6796D_TSI1_TEMP",
             "Type": "NCT6779"
         },

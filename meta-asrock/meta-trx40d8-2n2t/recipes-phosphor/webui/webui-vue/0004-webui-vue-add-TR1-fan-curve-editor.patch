@@ -1,0 +1,915 @@
+From e9fbd4b0362f27c2c4d5a51563ee040d4766beb8 Mon Sep 17 00:00:00 2001
+From: hoinzy <1684934+hoinzy@users.noreply.github.com>
+Date: Fri, 31 Jul 2026 03:37:06 +0200
+Subject: [PATCH] webui-vue: add TR1 fan curve editor
+
+Upstream-Status: Inappropriate [board-specific TR1 fan control]
+
+Signed-off-by: hoinzy <1684934+hoinzy@users.noreply.github.com>
+
+---
+ .../AppNavigation/AppNavigationMixin.js       |   6 +
+ src/locales/en-US.json                        |  24 +
+ src/router/routes.js                          |  10 +
+ src/store/index.js                            |   2 +
+ .../modules/HardwareStatus/FanControlStore.js | 113 +++++
+ .../HardwareStatus/FanControl/FanControl.vue  | 462 ++++++++++++++++++
+ src/views/HardwareStatus/FanControl/index.js  |   2 +
+ .../__snapshots__/AppNavigation.spec.js.snap  |  24 +
+ .../FanControl/FanControlStore.spec.js        | 117 +++++
+ 9 files changed, 760 insertions(+)
+ create mode 100644 src/store/modules/HardwareStatus/FanControlStore.js
+ create mode 100644 src/views/HardwareStatus/FanControl/FanControl.vue
+ create mode 100644 src/views/HardwareStatus/FanControl/index.js
+ create mode 100644 tests/unit/views/HardwareStatus/FanControl/FanControlStore.spec.js
+
+diff --git a/src/components/AppNavigation/AppNavigationMixin.js b/src/components/AppNavigation/AppNavigationMixin.js
+index 99db3e8..a2e8c16 100644
+--- a/src/components/AppNavigation/AppNavigationMixin.js
++++ b/src/components/AppNavigation/AppNavigationMixin.js
+@@ -71,6 +71,12 @@ const AppNavigationMixin = {
+               label: i18n.global.t('appNavigation.sensors'),
+               route: '/hardware-status/sensors',
+             },
++            {
++              id: 'fan-control',
++              label: i18n.global.t('appNavigation.fanControl'),
++              route: '/hardware-status/fan-control',
++              exclusiveToRoles: [roles.administrator],
++            },
+           ],
+         },
+         {
+diff --git a/src/locales/en-US.json b/src/locales/en-US.json
+index 7ad2eff..9f48e05 100644
+--- a/src/locales/en-US.json
++++ b/src/locales/en-US.json
+@@ -126,6 +126,7 @@
+         "eventLogs": "@:appPageTitle.eventLogs",
+         "factoryReset": "@:appPageTitle.factoryReset",
+         "biosConfiguration": "@:appPageTitle.biosConfiguration",
++        "fanControl": "@:appPageTitle.fanControl",
+         "firmware": "@:appPageTitle.firmware",
+         "hardwareStatus": "Hardware status",
+         "inventory": "@:appPageTitle.inventory",
+@@ -158,6 +159,7 @@
+         "eventLogs": "Event logs",
+         "factoryReset": "Factory reset",
+         "biosConfiguration": "BIOS configuration",
++        "fanControl": "Fan control",
+         "firmware": "Firmware",
+         "inventory": "Inventory and LEDs",
+         "kvm": "KVM",
+@@ -903,6 +905,28 @@
+             "upperCritical": "Upper critical"
+         }
+     },
++    "pageFanControl": {
++        "description": "Configure the fan and pump response to the TR1 water-temperature sensor.",
++        "curveTitle": "TR1 temperature curve",
++        "curveDescription": "Each point sets the fan and pump output at that temperature. Hysteresis prevents rapid switching near a threshold.",
++        "currentTemperature": "Current TR1 temperature",
++        "currentTarget": "Current curve target",
++        "temperatureAxis": "TR1 temperature (°C)",
++        "outputAxis": "Fan and pump output (%)",
++        "pointColumn": "Point",
++        "temperature": "Temperature (°C)",
++        "output": "Output (%)",
++        "positiveHysteresis": "Rising hysteresis",
++        "negativeHysteresis": "Falling hysteresis",
++        "controlledOutputs": "This curve controls FAN1 through FAN6, including the pump on FAN2. Loss of TR1 or a required fan tachometer selects the 100% fail-safe; telemetry-free channels follow the curve.",
++        "validation": "Temperatures must increase from left to right, and outputs must not decrease. Output must remain between 30% and 100%, and the final point must be 100%.",
++        "unavailable": "Unavailable",
++        "toast": {
++            "successSaveSettings": "Fan curve saved.",
++            "errorLoadSettings": "The fan curve could not be loaded.",
++            "errorSaveSettings": "The fan curve could not be saved."
++        }
++    },
+     "pageSerialOverLan": {
+         "accessDeniedAriaLabel": "Serial Over LAN access denied",
+         "alert": {
+diff --git a/src/router/routes.js b/src/router/routes.js
+index eb77f4c..e88e1c3 100644
+--- a/src/router/routes.js
++++ b/src/router/routes.js
+@@ -6,6 +6,7 @@ import DateTime from '@/views/Settings/DateTime';
+ import EventLogs from '@/views/Logs/EventLogs';
+ import FactoryReset from '@/views/Operations/FactoryReset';
+ import Firmware from '@/views/Operations/Firmware';
++import FanControl from '@/views/HardwareStatus/FanControl';
+ import Inventory from '@/views/HardwareStatus/Inventory';
+ import Kvm from '@/views/Operations/Kvm';
+ import KvmConsole from '@/views/Operations/Kvm/KvmConsole';
+@@ -154,6 +155,15 @@ const routes = [
+           title: i18n.global.t('appPageTitle.sensors'),
+         },
+       },
++      {
++        path: '/hardware-status/fan-control',
++        name: 'fan-control',
++        component: FanControl,
++        meta: {
++          title: i18n.global.t('appPageTitle.fanControl'),
++          exclusiveToRoles: [roles.administrator],
++        },
++      },
+       {
+         path: '/security-and-access/sessions',
+         name: 'sessions',
+diff --git a/src/store/index.js b/src/store/index.js
+index 61c08c2..df6c55c 100644
+--- a/src/store/index.js
++++ b/src/store/index.js
+@@ -18,6 +18,7 @@ import SystemStore from './modules/HardwareStatus/SystemStore';
+ import PowerSupplyStore from './modules/HardwareStatus/PowerSupplyStore';
+ import MemoryStore from './modules/HardwareStatus/MemoryStore';
+ import FanStore from './modules/HardwareStatus/FanStore';
++import FanControlStore from './modules/HardwareStatus/FanControlStore';
+ import ChassisStore from './modules/HardwareStatus/ChassisStore';
+ import BmcStore from './modules/HardwareStatus/BmcStore';
+ import ProcessorStore from './modules/HardwareStatus/ProcessorStore';
+@@ -56,6 +57,7 @@ const store = createStore({
+     system: SystemStore,
+     memory: MemoryStore,
+     fan: FanStore,
++    fanControl: FanControlStore,
+     chassis: ChassisStore,
+     bmc: BmcStore,
+     processors: ProcessorStore,
+diff --git a/src/store/modules/HardwareStatus/FanControlStore.js b/src/store/modules/HardwareStatus/FanControlStore.js
+new file mode 100644
+index 0000000..088d2ca
+--- /dev/null
++++ b/src/store/modules/HardwareStatus/FanControlStore.js
+@@ -0,0 +1,113 @@
++import api from '@/store/api';
++import i18n from '@/i18n';
++
++const managerPath = '/redfish/v1/Managers/bmc';
++const curveName = 'TR1_Fan_Curve';
++const tr1SensorPath =
++  '/redfish/v1/Chassis/ASRock_Rack_TRX40D8_2N2T/Sensors/temperature_TR1_TEMP';
++
++const FanControlStore = {
++  namespaced: true,
++  state: {
++    readings: [],
++    outputs: [],
++    positiveHysteresis: null,
++    negativeHysteresis: null,
++    tr1Temperature: null,
++  },
++  getters: {
++    readings: (state) => state.readings,
++    outputs: (state) => state.outputs,
++    positiveHysteresis: (state) => state.positiveHysteresis,
++    negativeHysteresis: (state) => state.negativeHysteresis,
++    tr1Temperature: (state) => state.tr1Temperature,
++  },
++  mutations: {
++    setCurve(state, curve) {
++      state.readings = curve.Reading;
++      state.outputs = curve.Output;
++      state.positiveHysteresis = curve.PositiveHysteresis;
++      state.negativeHysteresis = curve.NegativeHysteresis;
++    },
++    setTr1Temperature(state, temperature) {
++      state.tr1Temperature = temperature;
++    },
++  },
++  actions: {
++    async getFanCurve({ commit }) {
++      try {
++        const [curveResponse, sensorResponse] = await api.all([
++          api.get(managerPath),
++          api.get(tr1SensorPath),
++        ]);
++        const curve =
++          curveResponse.data?.Oem?.OpenBmc?.Fan?.StepwiseControllers?.[
++            curveName
++          ];
++        const steps = curve?.Steps;
++        const temperature = sensorResponse.data?.Reading;
++
++        if (
++          !Array.isArray(steps) ||
++          !steps.length ||
++          !steps.every(
++            (step) =>
++              Number.isFinite(step.Target) && Number.isFinite(step.Output),
++          )
++        ) {
++          throw new Error('Invalid fan curve response');
++        }
++
++        commit('setCurve', {
++          Reading: steps.map((step) => step.Target),
++          Output: steps.map((step) => step.Output),
++          PositiveHysteresis: curve.PositiveHysteresis,
++          NegativeHysteresis: curve.NegativeHysteresis,
++        });
++        commit(
++          'setTr1Temperature',
++          Number.isFinite(temperature) ? temperature : null,
++        );
++      } catch (error) {
++        console.log(error);
++        throw new Error(
++          i18n.global.t('pageFanControl.toast.errorLoadSettings'),
++        );
++      }
++    },
++    async saveFanCurve({ commit, dispatch, getters }, { readings, outputs }) {
++      try {
++        const steps = readings.map((target, index) => ({
++          Target: target,
++          Output: outputs[index],
++        }));
++        await api.patch(managerPath, {
++          Oem: {
++            OpenBmc: {
++              Fan: {
++                StepwiseControllers: {
++                  [curveName]: { Steps: steps },
++                },
++              },
++            },
++          },
++        });
++        commit('setCurve', {
++          Reading: readings,
++          Output: outputs,
++          PositiveHysteresis: getters.positiveHysteresis,
++          NegativeHysteresis: getters.negativeHysteresis,
++        });
++        return i18n.global.t('pageFanControl.toast.successSaveSettings');
++      } catch (error) {
++        console.log(error);
++        await dispatch('getFanCurve').catch(() => {});
++        throw new Error(
++          i18n.global.t('pageFanControl.toast.errorSaveSettings'),
++        );
++      }
++    },
++  },
++};
++
++export default FanControlStore;
+diff --git a/src/views/HardwareStatus/FanControl/FanControl.vue b/src/views/HardwareStatus/FanControl/FanControl.vue
+new file mode 100644
+index 0000000..9471943
+--- /dev/null
++++ b/src/views/HardwareStatus/FanControl/FanControl.vue
+@@ -0,0 +1,462 @@
++<template>
++  <b-container fluid="xl">
++    <page-title :description="$t('pageFanControl.description')" />
++
++    <b-alert show variant="info">
++      {{ $t('pageFanControl.controlledOutputs') }}
++    </b-alert>
++
++    <b-row>
++      <b-col xl="8">
++        <b-card class="mb-4" :title="$t('pageFanControl.curveTitle')">
++          <b-card-text>
++            {{ $t('pageFanControl.curveDescription') }}
++          </b-card-text>
++
++          <dl class="curve-status">
++            <div>
++              <dt>{{ $t('pageFanControl.currentTemperature') }}</dt>
++              <dd>{{ formattedTemperature }}</dd>
++            </div>
++            <div>
++              <dt>{{ $t('pageFanControl.currentTarget') }}</dt>
++              <dd>{{ formattedTarget }}</dd>
++            </div>
++          </dl>
++
++          <div
++            class="curve-chart"
++            role="img"
++            :aria-label="$t('pageFanControl.curveTitle')"
++          >
++            <svg viewBox="0 0 680 360" aria-hidden="true">
++              <g class="chart-grid">
++                <line
++                  v-for="tick in outputTicks"
++                  :key="`output-grid-${tick}`"
++                  :x1="chart.left"
++                  :x2="chart.width - chart.right"
++                  :y1="outputY(tick)"
++                  :y2="outputY(tick)"
++                />
++                <line
++                  v-for="tick in temperatureTicks"
++                  :key="`temperature-grid-${tick}`"
++                  :x1="temperatureX(tick)"
++                  :x2="temperatureX(tick)"
++                  :y1="chart.top"
++                  :y2="chart.height - chart.bottom"
++                />
++              </g>
++
++              <g class="chart-labels">
++                <text
++                  v-for="tick in outputTicks"
++                  :key="`output-label-${tick}`"
++                  :x="chart.left - 10"
++                  :y="outputY(tick) + 4"
++                  text-anchor="end"
++                >
++                  {{ tick }}
++                </text>
++                <text
++                  v-for="tick in temperatureTicks"
++                  :key="`temperature-label-${tick}`"
++                  :x="temperatureX(tick)"
++                  :y="chart.height - chart.bottom + 24"
++                  text-anchor="middle"
++                >
++                  {{ tick }}
++                </text>
++                <text
++                  :x="chart.left + plotWidth / 2"
++                  :y="chart.height - 8"
++                  text-anchor="middle"
++                >
++                  {{ $t('pageFanControl.temperatureAxis') }}
++                </text>
++                <text
++                  :x="16"
++                  :y="chart.top + plotHeight / 2"
++                  text-anchor="middle"
++                  :transform="`rotate(-90 16 ${chart.top + plotHeight / 2})`"
++                >
++                  {{ $t('pageFanControl.outputAxis') }}
++                </text>
++              </g>
++
++              <path class="curve-line" :d="stepPath" />
++
++              <g v-if="currentTemperatureInRange">
++                <line
++                  class="current-temperature-line"
++                  :x1="temperatureX(tr1Temperature)"
++                  :x2="temperatureX(tr1Temperature)"
++                  :y1="chart.top"
++                  :y2="chart.height - chart.bottom"
++                />
++                <circle
++                  class="current-target-point"
++                  :cx="temperatureX(tr1Temperature)"
++                  :cy="outputY(currentTarget)"
++                  r="6"
++                />
++              </g>
++            </svg>
++          </div>
++        </b-card>
++      </b-col>
++
++      <b-col xl="4">
++        <b-card class="mb-4">
++          <b-table-simple responsive>
++            <b-thead>
++              <b-tr>
++                <b-th>{{ $t('pageFanControl.pointColumn') }}</b-th>
++                <b-th>{{ $t('pageFanControl.temperature') }}</b-th>
++                <b-th>{{ $t('pageFanControl.output') }}</b-th>
++              </b-tr>
++            </b-thead>
++            <b-tbody>
++              <b-tr v-for="(point, index) in points" :key="index">
++                <b-th scope="row">{{ index + 1 }}</b-th>
++                <b-td>
++                  <b-form-input
++                    v-model.number="point.temperature"
++                    type="number"
++                    min="-40"
++                    max="150"
++                    step="0.5"
++                    :aria-label="
++                      $t('pageFanControl.temperature') + ' ' + (index + 1)
++                    "
++                    :state="inputState"
++                  />
++                </b-td>
++                <b-td>
++                  <b-form-input
++                    v-model.number="point.output"
++                    type="number"
++                    min="30"
++                    max="100"
++                    step="1"
++                    :aria-label="
++                      $t('pageFanControl.output') + ' ' + (index + 1)
++                    "
++                    :state="inputState"
++                  />
++                </b-td>
++              </b-tr>
++            </b-tbody>
++          </b-table-simple>
++
++          <b-alert :show="points.length > 0 && !curveIsValid" variant="danger">
++            {{ $t('pageFanControl.validation') }}
++          </b-alert>
++
++          <dl class="hysteresis">
++            <div>
++              <dt>{{ $t('pageFanControl.positiveHysteresis') }}</dt>
++              <dd>{{ positiveHysteresis }} °C</dd>
++            </div>
++            <div>
++              <dt>{{ $t('pageFanControl.negativeHysteresis') }}</dt>
++              <dd>{{ negativeHysteresis }} °C</dd>
++            </div>
++          </dl>
++
++          <b-button
++            variant="primary"
++            class="me-2"
++            :disabled="!curveIsValid || saving"
++            @click="saveCurve"
++          >
++            {{ $t('global.action.saveSettings') }}
++          </b-button>
++          <b-button variant="secondary" :disabled="saving" @click="loadCurve">
++            {{ $t('global.action.reset') }}
++          </b-button>
++        </b-card>
++      </b-col>
++    </b-row>
++  </b-container>
++</template>
++
++<script>
++import PageTitle from '@/components/Global/PageTitle';
++import LoadingBarMixin from '@/components/Mixins/LoadingBarMixin';
++import BVToastMixin from '@/components/Mixins/BVToastMixin';
++
++const pointCount = 7;
++
++export default {
++  name: 'FanControl',
++  components: { PageTitle },
++  mixins: [BVToastMixin, LoadingBarMixin],
++  beforeRouteLeave(to, from, next) {
++    this.hideLoader();
++    next();
++  },
++  data() {
++    return {
++      chart: {
++        width: 680,
++        height: 360,
++        left: 64,
++        right: 20,
++        top: 20,
++        bottom: 54,
++      },
++      points: [],
++      saving: false,
++    };
++  },
++  computed: {
++    readings() {
++      return this.$store.getters['fanControl/readings'];
++    },
++    outputs() {
++      return this.$store.getters['fanControl/outputs'];
++    },
++    positiveHysteresis() {
++      return this.$store.getters['fanControl/positiveHysteresis'];
++    },
++    negativeHysteresis() {
++      return this.$store.getters['fanControl/negativeHysteresis'];
++    },
++    tr1Temperature() {
++      return this.$store.getters['fanControl/tr1Temperature'];
++    },
++    plotWidth() {
++      return this.chart.width - this.chart.left - this.chart.right;
++    },
++    plotHeight() {
++      return this.chart.height - this.chart.top - this.chart.bottom;
++    },
++    temperatureMinimum() {
++      if (!this.points.length) return 0;
++      return Math.floor((this.points[0].temperature - 5) / 5) * 5;
++    },
++    temperatureMaximum() {
++      if (!this.points.length) return 60;
++      const last = this.points[this.points.length - 1].temperature;
++      return Math.max(
++        Math.ceil((last + 5) / 5) * 5,
++        this.temperatureMinimum + 5,
++      );
++    },
++    temperatureTicks() {
++      const range = this.temperatureMaximum - this.temperatureMinimum;
++      return Array.from(
++        { length: 6 },
++        (_, index) => this.temperatureMinimum + (range * index) / 5,
++      );
++    },
++    outputTicks() {
++      return [0, 20, 40, 60, 80, 100];
++    },
++    stepPath() {
++      if (!this.curveIsValid) return '';
++      const path = [
++        `M ${this.temperatureX(this.temperatureMinimum)} ${this.outputY(
++          this.points[0].output,
++        )}`,
++      ];
++
++      this.points.slice(1).forEach((point) => {
++        path.push(`H ${this.temperatureX(point.temperature)}`);
++        path.push(`V ${this.outputY(point.output)}`);
++      });
++      path.push(`H ${this.temperatureX(this.temperatureMaximum)}`);
++      return path.join(' ');
++    },
++    curveNumbersAreFinite() {
++      return this.points.every(
++        (point) =>
++          Number.isFinite(point.temperature) && Number.isFinite(point.output),
++      );
++    },
++    curveIsValid() {
++      if (this.points.length !== pointCount || !this.curveNumbersAreFinite) {
++        return false;
++      }
++
++      return this.points.every((point, index) => {
++        const previous = this.points[index - 1];
++        return (
++          point.temperature >= -40 &&
++          point.temperature <= 150 &&
++          point.output >= 30 &&
++          point.output <= 100 &&
++          (!previous ||
++            (point.temperature > previous.temperature &&
++              point.output >= previous.output)) &&
++          (index !== this.points.length - 1 || point.output === 100)
++        );
++      });
++    },
++    inputState() {
++      return this.curveIsValid ? null : false;
++    },
++    currentTarget() {
++      if (
++        !Number.isFinite(this.tr1Temperature) ||
++        !this.points.length ||
++        !this.curveNumbersAreFinite
++      ) {
++        return null;
++      }
++
++      let target = this.points[0].output;
++      this.points.slice(1).forEach((point) => {
++        if (this.tr1Temperature >= point.temperature) {
++          target = point.output;
++        }
++      });
++      return target;
++    },
++    currentTemperatureInRange() {
++      return (
++        Number.isFinite(this.tr1Temperature) &&
++        Number.isFinite(this.currentTarget) &&
++        this.tr1Temperature >= this.temperatureMinimum &&
++        this.tr1Temperature <= this.temperatureMaximum
++      );
++    },
++    formattedTemperature() {
++      return Number.isFinite(this.tr1Temperature)
++        ? `${this.tr1Temperature.toFixed(1)} °C`
++        : this.$t('pageFanControl.unavailable');
++    },
++    formattedTarget() {
++      return Number.isFinite(this.currentTarget)
++        ? `${this.currentTarget}%`
++        : this.$t('pageFanControl.unavailable');
++    },
++  },
++  created() {
++    this.loadCurve();
++  },
++  methods: {
++    setPointsFromStore() {
++      this.points = this.readings.map((temperature, index) => ({
++        temperature,
++        output: this.outputs[index],
++      }));
++    },
++    temperatureX(value) {
++      const range = this.temperatureMaximum - this.temperatureMinimum;
++      return (
++        this.chart.left +
++        ((value - this.temperatureMinimum) / range) * this.plotWidth
++      );
++    },
++    outputY(value) {
++      return this.chart.top + ((100 - value) / 100) * this.plotHeight;
++    },
++    async loadCurve() {
++      this.startLoader();
++      try {
++        await this.$store.dispatch('fanControl/getFanCurve');
++        this.setPointsFromStore();
++      } catch ({ message }) {
++        this.errorToast(message);
++      } finally {
++        this.endLoader();
++      }
++    },
++    async saveCurve() {
++      if (!this.curveIsValid) return;
++
++      this.saving = true;
++      this.startLoader();
++      try {
++        const message = await this.$store.dispatch('fanControl/saveFanCurve', {
++          readings: this.points.map((point) => point.temperature),
++          outputs: this.points.map((point) => point.output),
++        });
++        this.successToast(message);
++      } catch ({ message }) {
++        this.errorToast(message);
++        this.setPointsFromStore();
++      } finally {
++        this.saving = false;
++        this.endLoader();
++      }
++    },
++  },
++};
++</script>
++
++<style lang="scss" scoped>
++.curve-status,
++.hysteresis {
++  display: flex;
++  flex-wrap: wrap;
++  gap: 1rem 2rem;
++  margin-bottom: 1rem;
++
++  div {
++    min-width: 10rem;
++  }
++
++  dt {
++    color: $gray-700;
++    font-size: 0.875rem;
++    font-weight: 400;
++  }
++
++  dd {
++    font-size: 1.25rem;
++    font-weight: 600;
++    margin: 0;
++  }
++}
++
++.curve-chart {
++  overflow-x: auto;
++
++  svg {
++    display: block;
++    min-width: 36rem;
++    width: 100%;
++  }
++}
++
++.chart-grid line {
++  stroke: $gray-300;
++  stroke-width: 1;
++}
++
++.chart-labels text {
++  fill: $gray-700;
++  font-size: 12px;
++}
++
++.curve-line {
++  fill: none;
++  stroke: $primary;
++  stroke-linejoin: round;
++  stroke-width: 4;
++}
++
++.current-temperature-line {
++  stroke: $gray-700;
++  stroke-dasharray: 6 4;
++  stroke-width: 2;
++}
++
++.current-target-point {
++  fill: $primary;
++  stroke: $white;
++  stroke-width: 3;
++}
++
++.hysteresis {
++  margin-top: 1rem;
++
++  dd {
++    font-size: 1rem;
++  }
++}
++</style>
+diff --git a/src/views/HardwareStatus/FanControl/index.js b/src/views/HardwareStatus/FanControl/index.js
+new file mode 100644
+index 0000000..8e0483a
+--- /dev/null
++++ b/src/views/HardwareStatus/FanControl/index.js
+@@ -0,0 +1,2 @@
++import FanControl from './FanControl.vue';
++export default FanControl;
+diff --git a/tests/unit/__snapshots__/AppNavigation.spec.js.snap b/tests/unit/__snapshots__/AppNavigation.spec.js.snap
+index 595dfeb..37372df 100644
+--- a/tests/unit/__snapshots__/AppNavigation.spec.js.snap
++++ b/tests/unit/__snapshots__/AppNavigation.spec.js.snap
+@@ -160,6 +160,12 @@ exports[`AppNavigation.vue > should render correctly 1`] = `
+                 to="/hardware-status/sensors"
+               >Sensors</a>
+             </li>
++            <li class="nav-item">
++              <a
++                class="nav-link"
++                to="/hardware-status/fan-control"
++              >Fan control</a>
++            </li>
+           </ul>
+         </li>
+         <!-- Navigation items with no children -->
+@@ -215,6 +221,12 @@ exports[`AppNavigation.vue > should render correctly 1`] = `
+                 to="/operations/kvm"
+               >KVM</a>
+             </li>
++            <li class="nav-item">
++              <a
++                class="nav-link"
++                to="/operations/bios-configuration"
++              >BIOS configuration</a>
++            </li>
+             <li class="nav-item">
+               <a
+                 class="nav-link"
+@@ -612,6 +624,12 @@ exports[`AppNavigation.vue > should render with nav-container open 1`] = `
+                 to="/hardware-status/sensors"
+               >Sensors</a>
+             </li>
++            <li class="nav-item">
++              <a
++                class="nav-link"
++                to="/hardware-status/fan-control"
++              >Fan control</a>
++            </li>
+           </ul>
+         </li>
+         <!-- Navigation items with no children -->
+@@ -667,6 +685,12 @@ exports[`AppNavigation.vue > should render with nav-container open 1`] = `
+                 to="/operations/kvm"
+               >KVM</a>
+             </li>
++            <li class="nav-item">
++              <a
++                class="nav-link"
++                to="/operations/bios-configuration"
++              >BIOS configuration</a>
++            </li>
+             <li class="nav-item">
+               <a
+                 class="nav-link"
+diff --git a/tests/unit/views/HardwareStatus/FanControl/FanControlStore.spec.js b/tests/unit/views/HardwareStatus/FanControl/FanControlStore.spec.js
+new file mode 100644
+index 0000000..d5017a4
+--- /dev/null
++++ b/tests/unit/views/HardwareStatus/FanControl/FanControlStore.spec.js
+@@ -0,0 +1,117 @@
++import { createStore } from 'vuex';
++import { beforeEach, describe, expect, it, vi } from 'vitest';
++
++vi.mock('@/store/api', () => ({
++  default: {
++    get: vi.fn(),
++    patch: vi.fn(),
++    all: vi.fn((promises) => Promise.all(promises)),
++  },
++}));
++
++import api from '@/store/api';
++import FanControlStore from '@/store/modules/HardwareStatus/FanControlStore';
++
++const managerPath = '/redfish/v1/Managers/bmc';
++const curveName = 'TR1_Fan_Curve';
++const tr1SensorPath =
++  '/redfish/v1/Chassis/ASRock_Rack_TRX40D8_2N2T/Sensors/temperature_TR1_TEMP';
++const readings = [20, 25, 30, 35, 40, 45, 50];
++const outputs = [50, 55, 60, 70, 80, 90, 100];
++
++function buildStore() {
++  return createStore({
++    modules: {
++      fanControl: FanControlStore,
++    },
++  });
++}
++
++describe('FanControlStore', () => {
++  let store;
++
++  beforeEach(() => {
++    vi.clearAllMocks();
++    store = buildStore();
++    api.get.mockImplementation((path) => {
++      if (path === managerPath) {
++        return Promise.resolve({
++          data: {
++            Oem: {
++              OpenBmc: {
++                Fan: {
++                  StepwiseControllers: {
++                    [curveName]: {
++                      Steps: readings.map((Target, index) => ({
++                        Target,
++                        Output: outputs[index],
++                      })),
++                      PositiveHysteresis: 0.5,
++                      NegativeHysteresis: 0.5,
++                    },
++                  },
++                },
++              },
++            },
++          },
++        });
++      }
++      if (path === tr1SensorPath) {
++        return Promise.resolve({ data: { Reading: 32 } });
++      }
++      return Promise.reject(new Error('Unexpected path'));
++    });
++    api.patch.mockResolvedValue({ data: { status: 'ok' } });
++  });
++
++  it('loads the editable curve and current TR1 temperature', async () => {
++    await store.dispatch('fanControl/getFanCurve');
++
++    expect(store.getters['fanControl/readings']).toEqual(readings);
++    expect(store.getters['fanControl/outputs']).toEqual(outputs);
++    expect(store.getters['fanControl/tr1Temperature']).toBe(32);
++    expect(api.get).toHaveBeenCalledWith(managerPath);
++    expect(api.get).toHaveBeenCalledWith(tr1SensorPath);
++  });
++
++  it('persists the complete curve through the Redfish manager API', async () => {
++    await store.dispatch('fanControl/getFanCurve');
++    await store.dispatch('fanControl/saveFanCurve', {
++      readings,
++      outputs,
++    });
++
++    expect(api.patch).toHaveBeenCalledWith(managerPath, {
++      Oem: {
++        OpenBmc: {
++          Fan: {
++            StepwiseControllers: {
++              [curveName]: {
++                Steps: readings.map((Target, index) => ({
++                  Target,
++                  Output: outputs[index],
++                })),
++              },
++            },
++          },
++        },
++      },
++    });
++  });
++
++  it('rejects malformed curve responses', async () => {
++    api.get.mockImplementation((path) =>
++      Promise.resolve({
++        data: {
++          ...(path === managerPath
++            ? { Oem: { OpenBmc: { Fan: { StepwiseControllers: {} } } } }
++            : { Reading: 32 }),
++        },
++      }),
++    );
++
++    await expect(store.dispatch('fanControl/getFanCurve')).rejects.toThrow(
++      'The fan curve could not be loaded.',
++    );
++  });
++});
+-- 
+2.50.1 (Apple Git-155)

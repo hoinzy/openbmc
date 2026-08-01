@@ -82,6 +82,12 @@ devices are declared yet for I2C3.
   observation on this board before host-control tests.
 - The FRU product probe is exact: manufacturer `ASRockRack`, product
   `TRX40D8-2N2T`.
+- The ASPEED host-VGA capture path is functional. OpenBMC KVM displays AMI
+  POST and displays a Linux virtual console whenever that console is mapped to
+  the host AST DRM framebuffer. A discrete NVIDIA GOP can still become the
+  EFI boot framebuffer even with BIOS `Primary Graphics Adapter` set to
+  `Onboard VGA`; that host-firmware/OS console-selection issue is not a BMC
+  video-engine or device-tree failure.
 
 ## Still to discover
 
@@ -99,7 +105,6 @@ devices are declared yet for I2C3.
   external monitor.
 - The exact `BMC_READY`, PROCHOT, THERMTRIP, chassis-intrusion, POST-complete,
   sleep-state, and power-good GPIO assignments.
-- The BMC video path with BIOS `Onboard VGA` selected as primary.
 - Virtual media behavior through the AST2500 virtual USB hub.
 
 ## Host inventory and Redfish collections
@@ -119,11 +124,13 @@ controller, and Intel I225-LM NICs, while host hwmon currently exposes AMD
 
 ## Cooling invariant
 
-Until all thermal sensors and fan outputs are verified, FAN1, FAN2, and FAN3
-must remain at full duty and no automatic fan controller may be enabled. FAN2
-is the water pump and must never be slowed or stopped. The inherited AST2500
-`aspeed-pwm-tacho` driver initializes every declared PWM port to `0xff`;
-target bring-up must still verify the physical polarity and resulting speed.
+The AST2500 `aspeed-pwm-tacho` driver initializes every declared PWM port to
+`0xff`. `phosphor-pid-control` may reduce duty only after the healthy TR1
+temperature object is available; loss of that required input must return all
+zones to the 100% fail-safe. FAN2 is the water pump and has no readable tach,
+so it is explicitly missing-acceptable but still follows the TR1 curve. Any
+change to the fan connector mapping, pump, or thermal input requires a guarded
+100%-first validation before closed-loop control is re-enabled.
 
 ## Reversible first boot
 

@@ -1,0 +1,78 @@
+#!/bin/sh
+#
+# The vendor BMC reads NCT6796D register 0x48d (VIN3) for TR1 and converts
+# the raw byte with temperature = 145 - raw.  Linux exposes that register as
+# in13_input in millivolts, using an 8 mV/LSB scale.  Read the kernel-owned
+# hwmon interface so this service never competes for the I2C controller.
+
+set -u
+
+service=xyz.openbmc_project.ExternalSensor
+object=/xyz/openbmc_project/sensors/temperature/TR1_TEMP
+interface=xyz.openbmc_project.Sensor.Value
+hwmon_path=
+unavailable_logged=false
+
+find_nct6796_hwmon()
+{
+    for candidate in /sys/class/hwmon/hwmon*; do
+        [ -r "$candidate/name" ] || continue
+        [ "$(cat "$candidate/name")" = "nct6796" ] || continue
+        [ -r "$candidate/in13_input" ] || continue
+        printf '%s\n' "$candidate"
+        return 0
+    done
+    return 1
+}
+
+publish_value()
+{
+    busctl --timeout=3 set-property \
+        "$service" "$object" "$interface" Value d "$1" >/dev/null 2>&1
+}
+
+invalidate_value()
+{
+    publish_value nan || true
+}
+
+while true; do
+    if [ -z "$hwmon_path" ]; then
+        hwmon_path=$(find_nct6796_hwmon) || hwmon_path=
+    fi
+
+    millivolts=
+    if [ -n "$hwmon_path" ] &&
+       { read -r millivolts < "$hwmon_path/in13_input"; } 2>/dev/null; then
+        case "$millivolts" in
+            *[!0-9]*|'') millivolts= ;;
+        esac
+    else
+        hwmon_path=
+    fi
+
+    # A raw value of 0xff is the vendor firmware's unavailable sentinel.
+    if [ -n "$millivolts" ] &&
+       [ "$millivolts" -ge 0 ] &&
+       [ "$millivolts" -le 2032 ]; then
+        temperature=$((145 - millivolts / 8))
+        if publish_value "$temperature"; then
+            if [ "$unavailable_logged" = true ]; then
+                logger -t trx40d8-tr1-sensor \
+                    "TR1 sensor available at ${temperature} C"
+            fi
+            unavailable_logged=false
+        else
+            hwmon_path=
+        fi
+    else
+        invalidate_value
+        if [ "$unavailable_logged" = false ]; then
+            logger -t trx40d8-tr1-sensor \
+                "waiting for the NCT6796D TR1 input"
+            unavailable_logged=true
+        fi
+    fi
+
+    sleep 2
+done

@@ -1,0 +1,40 @@
+From 14a0e15ec2f34165e18c19602916b33308e80ce0 Mon Sep 17 00:00:00 2001
+From: hoinzy <1684934+hoinzy@users.noreply.github.com>
+Date: Thu, 31 Jul 2026 04:14:00 +0200
+Subject: [PATCH] dbus: keep missing acceptable for fan PWM pairs
+
+Dynamic fan sensors are indexed by the concatenation of their tach and PWM
+names.  MissingIsAcceptable, however, contains the original tach name, so its
+setting is lost before the zone receives the paired sensor.
+
+Carry the setting over to the generated name.  This permits feed-forward fan
+controllers to drive a PWM when a connected device, such as a pump, does not
+provide a readable tachometer signal.
+
+Upstream-Status: Pending [needs upstream submission]
+
+Signed-off-by: hoinzy <1684934+hoinzy@users.noreply.github.com>
+---
+ dbus/dbusconfiguration.cpp | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/dbus/dbusconfiguration.cpp b/dbus/dbusconfiguration.cpp
+index 09d0a12..9d4a639 100644
+--- a/dbus/dbusconfiguration.cpp
++++ b/dbus/dbusconfiguration.cpp
+@@ -968,6 +968,13 @@ bool init(sdbusplus::asio::connection& bus,
+                         fanSensorName = getSensorNameFromPath(fanPath);
+                         pwmSensorName = getSensorNameFromPath(pwmPath);
+                         std::string fanPwmIndex = fanSensorName + pwmSensorName;
++                        if (std::find(missingAcceptableSensorNames.begin(),
++                                      missingAcceptableSensorNames.end(),
++                                      fanSensorName) !=
++                            missingAcceptableSensorNames.end())
++                        {
++                            missingAcceptableSensorNames.push_back(fanPwmIndex);
++                        }
+                         archivedInputSensorNames.push_back(fanPwmIndex);
+                         auto& fanConfig = sensorConfig[fanPwmIndex];
+                         fanConfig.type = pidClass;
+-- 
+2.50.1

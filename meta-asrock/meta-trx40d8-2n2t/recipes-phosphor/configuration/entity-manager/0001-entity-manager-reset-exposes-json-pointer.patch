@@ -1,0 +1,35 @@
+From 1ec5c57ee688f90247c0759e43d7aaae6d9bf885 Mon Sep 17 00:00:00 2001
+From: hoinzy <1684934+hoinzy@users.noreply.github.com>
+Date: Thu, 31 Jul 2026 04:32:00 +0200
+Subject: [PATCH] entity-manager: reset exposes JSON pointer
+
+postExposesRecordsToDBus reuses jsonPointerPath while walking nested fields.
+After that loop it still points at the last field, so writable properties on
+the main configuration interface try to update a child of that field.  Array
+fields such as Stepwise.Zones then reject every property update.
+
+Restore the pointer to the exposes record before populating its interface.
+
+Upstream-Status: Pending [needs upstream submission]
+
+Signed-off-by: hoinzy <1684934+hoinzy@users.noreply.github.com>
+---
+ src/entity_manager/entity_manager.cpp | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/src/entity_manager/entity_manager.cpp b/src/entity_manager/entity_manager.cpp
+index 598999e..593ef4d 100644
+--- a/src/entity_manager/entity_manager.cpp
++++ b/src/entity_manager/entity_manager.cpp
+@@ -296,6 +296,9 @@ void EntityManager::postExposesRecordsToDBus(
+         }
+     }
+ 
++    jsonPointerPath = jsonPointerPathBoard;
++    jsonPointerPath.append(std::to_string(exposesIndex));
++
+     std::shared_ptr<sdbusplus::asio::dbus_interface> itemIface =
+         dbus_interface.createInterface(
+             ifacePath, "xyz.openbmc_project.Configuration." + itemType,
+-- 
+2.50.1

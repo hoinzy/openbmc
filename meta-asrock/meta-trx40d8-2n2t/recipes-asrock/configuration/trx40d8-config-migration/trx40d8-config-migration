@@ -1,0 +1,132 @@
+#!/bin/sh
+#
+# Entity Manager persists writable properties by copying its complete source
+# JSON into the JFFS2 overlay.  That copy can mask newly shipped board fields
+# after an image update.  On a schema-version change, preserve the writable
+# TR1 curve, refresh the upper copy in place, and restore the curve before fan
+# control starts.
+
+set -eu
+
+readonly service=xyz.openbmc_project.EntityManager
+readonly entity_unit=xyz.openbmc_project.EntityManager.service
+readonly object=/xyz/openbmc_project/inventory/system/board/ASRock_Rack_TRX40D8_2N2T/TR1_Fan_Curve
+readonly interface=xyz.openbmc_project.Configuration.Stepwise
+readonly lower=/run/initramfs/ro/usr/share/entity-manager/configurations/asrock/trx40d8-2n2t.json
+readonly upper=/run/initramfs/rw/cow/usr/share/entity-manager/configurations/asrock/trx40d8-2n2t.json
+readonly version_file=/usr/share/trx40d8-config-migration/config-schema-version
+readonly state_dir=/var/lib/trx40d8-config-migration
+readonly state_file=${state_dir}/config-schema-version
+readonly runtime_dir=/run/trx40d8-config-migration
+readonly backup_dir=/var/lib/entity-manager-backups
+
+entity_stopped=false
+
+restore_entity()
+{
+    if [ "$entity_stopped" = true ]; then
+        systemctl start "$entity_unit" || true
+    fi
+}
+
+trap restore_entity EXIT
+
+target_version=$(cat "$version_file")
+readonly backup_file=${backup_dir}/trx40d8-2n2t.pre-schema-${target_version}.json
+current_version=
+if [ -r "$state_file" ]; then
+    current_version=$(cat "$state_file")
+fi
+
+if [ "$current_version" = "$target_version" ]; then
+    exit 0
+fi
+
+mkdir -p "$state_dir"
+
+# Without an upper copy, the image configuration is already authoritative.
+if [ ! -f "$upper" ]; then
+    printf '%s\n' "$target_version" > "$state_file"
+    exit 0
+fi
+
+mkdir -p "$runtime_dir"
+
+capture_curve()
+{
+    busctl get-property "$service" "$object" "$interface" Reading \
+        > "${runtime_dir}/Reading" 2>/dev/null &&
+    busctl get-property "$service" "$object" "$interface" Output \
+        > "${runtime_dir}/Output" 2>/dev/null &&
+    busctl get-property "$service" "$object" "$interface" \
+        PositiveHysteresis > "${runtime_dir}/PositiveHysteresis" 2>/dev/null &&
+    busctl get-property "$service" "$object" "$interface" \
+        NegativeHysteresis > "${runtime_dir}/NegativeHysteresis" 2>/dev/null
+}
+
+wait_for_curve()
+{
+    attempt=0
+    while [ "$attempt" -lt 90 ]; do
+        if busctl get-property "$service" "$object" "$interface" Reading \
+            >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 1
+        attempt=$((attempt + 1))
+    done
+    return 1
+}
+
+if ! wait_for_curve || ! capture_curve; then
+    logger -t trx40d8-config-migration \
+        "could not capture the existing TR1 fan curve; leaving persistent configuration unchanged"
+    exit 0
+fi
+
+# The unit is ordered before fan control.  Set full speed directly as an
+# additional guard without cancelling its pending systemd start job.
+if [ -x /usr/bin/trx40d8-fan-full-speed ]; then
+    /usr/bin/trx40d8-fan-full-speed
+fi
+systemctl stop "$entity_unit"
+entity_stopped=true
+
+# Keep the first configuration encountered for this target schema so a
+# partially completed retry cannot overwrite the recovery copy.
+mkdir -p "$backup_dir"
+if [ ! -e "$backup_file" ]; then
+    cp "$upper" "$backup_file"
+fi
+
+# Overwrite the existing inode.  Replacing it by unlink/rename leaves a stale
+# OverlayFS dentry until reboot on the AST2500 image layout.
+cp "$lower" "$upper"
+sync
+
+systemctl start "$entity_unit"
+entity_stopped=false
+
+if ! wait_for_curve; then
+    logger -t trx40d8-config-migration \
+        "refreshed the board configuration but could not restore the TR1 fan curve"
+    exit 1
+fi
+
+restore_property()
+{
+    property=$1
+    # busctl emits the signature followed by its argument count and values;
+    # that is also the input form accepted by set-property.
+    set -- $(cat "${runtime_dir}/${property}")
+    busctl set-property "$service" "$object" "$interface" "$property" "$@"
+}
+
+restore_property Reading
+restore_property Output
+restore_property PositiveHysteresis
+restore_property NegativeHysteresis
+
+printf '%s\n' "$target_version" > "$state_file"
+logger -t trx40d8-config-migration \
+    "migrated board configuration schema to version ${target_version} and restored the TR1 fan curve"
