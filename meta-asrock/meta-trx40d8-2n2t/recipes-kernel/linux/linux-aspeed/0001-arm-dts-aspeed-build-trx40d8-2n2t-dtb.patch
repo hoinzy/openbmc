@@ -13,8 +13,8 @@ Upstream-Status: Pending
 Signed-off-by: Till Heinzerling <1684934+hoinzy@users.noreply.github.com>
 ---
  arch/arm/boot/dts/aspeed/Makefile                         |  1 +
- .../dts/aspeed/aspeed-bmc-asrock-trx40d8-2n2t.dts         | 71 +++++++++++++++++++++
- 2 files changed, 72 insertions(+)
+ .../dts/aspeed/aspeed-bmc-asrock-trx40d8-2n2t.dts         | 72 +++++++++++++++++++++
+ 2 files changed, 73 insertions(+)
 
 diff --git a/arch/arm/boot/dts/aspeed/Makefile b/arch/arm/boot/dts/aspeed/Makefile
 index 371e5c0d0ce7..f76c9b609d8f 100644
@@ -33,7 +33,7 @@ new file mode 100644
 index 000000000000..000000000000
 --- /dev/null
 +++ b/arch/arm/boot/dts/aspeed/aspeed-bmc-asrock-trx40d8-2n2t.dts
-@@ -0,0 +1,71 @@
+@@ -0,0 +1,72 @@
 +// SPDX-License-Identifier: GPL-2.0+
 +/*
 + * Device tree for the ASRock Rack TRX40D8-2N2T.
