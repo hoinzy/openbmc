@@ -2,7 +2,12 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 SRC_URI += "file://bios-update.sh"
 
 PACKAGECONFIG:append = " flash_bios"
-RDEPENDS:${PN} += "bash libgpiod"
+RDEPENDS:${PN}-updater += "bash libgpiod"
+
+FILES:${PN}-updater += " \
+    ${sbindir}/bios-update.sh \
+    ${sysconfdir}/default/bios-update \
+"
 
 do_install:append() {
     install -d ${D}/${sbindir}
