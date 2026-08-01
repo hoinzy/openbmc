@@ -7,12 +7,20 @@ is no additional host-flash ownership GPIO on this board.
 
 OpenBMC marks SPI1 for manual binding. During normal operation the Aspeed SPI
 driver is not attached, so its pinctrl state is released to the host. The
-updater follows this sequence:
+vendor module also enables both SPI1 chip-select paths and sanitizes the CE0
+control register before flash detection. OpenBMC reproduces that initialization
+only after an explicit, host-off manual bind. The updater follows this sequence:
 
 1. Require `CurrentHostState=Off`.
 2. Set the platform-device `driver_override` to `spi-aspeed-smc`.
 3. Bind `1e630000.spi`, locate the `bios` MTD device, and read or write it.
 4. Unbind the driver and clear the override on success, failure, or signal.
+
+An image without the vendor-compatible controller initialization failed safely
+with JEDEC bytes `00 00 00 00 00 00`: no MTD device or backup file was created,
+and the cleanup path restored the unbound idle state. That result is the reason
+the `aspeed,host-flash-init` quirk is board-gated rather than applied to every
+ASPEED SPI controller.
 
 ## First-deployment checks
 

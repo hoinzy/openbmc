@@ -1,0 +1,104 @@
+From 223a22e82ca34b1c06c269c9b94e312daf3c79a4 Mon Sep 17 00:00:00 2001
+From: Till Heinzerling <1684934+hoinzy@users.noreply.github.com>
+Date: Sat, 1 Aug 2026 16:00:00 +0200
+Subject: [PATCH] spi: aspeed: initialize shared AST2500 host flash
+
+The ASRock Rack AST2500 host-SPI implementation enables both chip-select
+write paths and sanitizes the CE0 control register before attempting flash
+identification. Without that initialization the TRX40D8-2N2T reads an
+all-zero JEDEC ID after Linux takes ownership of SPI1.
+
+Add an opt-in property for this vendor-compatible initialization. Restrict
+it to the AST2500 SPI controller and pair it with manual binding so the
+controller remains released whenever the host may be running.
+
+Upstream-Status: Pending
+Signed-off-by: Till Heinzerling <1684934+hoinzy@users.noreply.github.com>
+---
+ .../bindings/spi/aspeed,ast2600-fmc.yaml      | 11 ++++++
+ drivers/spi/spi-aspeed-smc.c                  | 37 +++++++++++++++++++-
+ 2 files changed, 48 insertions(+), 1 deletion(-)
+
+diff --git a/Documentation/devicetree/bindings/spi/aspeed,ast2600-fmc.yaml b/Documentation/devicetree/bindings/spi/aspeed,ast2600-fmc.yaml
+index ac8c20b322c9..4645dc716462 100644
+--- a/Documentation/devicetree/bindings/spi/aspeed,ast2600-fmc.yaml
++++ b/Documentation/devicetree/bindings/spi/aspeed,ast2600-fmc.yaml
+@@ -43,6 +43,17 @@ properties:
+       Userspace may set the platform device driver_override and bind the
+       controller explicitly after verifying that the host is off.
+ 
++  aspeed,host-flash-init:
++    type: boolean
++    description:
++      Restore the controller state required to access a host firmware flash
++      after the host has released it. On the AST2500 SPI controller this
++      enables both chip-select write paths and clears stale command and mode
++      fields in the CE0 control register before child devices are probed.
++      This property is intended for vendor-compatible host-flash recovery and
++      must be combined with aspeed,manual-bind so the BMC cannot claim the
++      shared bus while the host is running.
++
+ required:
+   - compatible
+   - reg
+diff --git a/drivers/spi/spi-aspeed-smc.c b/drivers/spi/spi-aspeed-smc.c
+index c29bfc7c267c..cf5e996e3600 100644
+--- a/drivers/spi/spi-aspeed-smc.c
++++ b/drivers/spi/spi-aspeed-smc.c
+@@ -950,6 +950,37 @@ static void aspeed_spi_enable(struct aspeed_spi *aspi, bool enable)
+ 		aspeed_spi_chip_enable(aspi, cs, enable);
+ }
+ 
++#define AST2500_HOST_FLASH_CTRL_MASK	GENMASK(15, 8) | GENMASK(5, 2)
++
++static int aspeed_spi_host_flash_init(struct aspeed_spi *aspi)
++{
++	u32 config;
++	u32 control;
++
++	if (!device_property_read_bool(aspi->dev, "aspeed,host-flash-init"))
++		return 0;
++
++	if (!device_property_read_bool(aspi->dev, "aspeed,manual-bind"))
++		return dev_err_probe(aspi->dev, -EINVAL,
++				     "host flash initialization requires manual binding\n");
++
++	if (aspi->data != &ast2500_spi_data)
++		return dev_err_probe(aspi->dev, -EINVAL,
++				     "host flash initialization requires AST2500 SPI\n");
++
++	config = readl(aspi->regs + CONFIG_REG);
++	config |= GENMASK(aspi->data->we0 + aspi->data->max_cs - 1,
++			  aspi->data->we0);
++	writel(config, aspi->regs + CONFIG_REG);
++
++	control = readl(aspi->regs + aspi->data->ctl0);
++	control &= AST2500_HOST_FLASH_CTRL_MASK;
++	writel(control, aspi->regs + aspi->data->ctl0);
++
++	dev_info(aspi->dev, "initialized AST2500 host flash controller\n");
++	return 0;
++}
++
+ static int aspeed_spi_probe(struct platform_device *pdev)
+ {
+ 	struct device *dev = &pdev->dev;
+@@ -1009,9 +1040,15 @@ static int aspeed_spi_probe(struct platform_device *pdev)
+ 	ctlr->num_chipselect = data->max_cs;
+ 	ctlr->dev.of_node = dev->of_node;
+ 
++	ret = aspeed_spi_host_flash_init(aspi);
++	if (ret)
++		return ret;
++
+ 	ret = spi_register_controller(ctlr);
+-	if (ret)
++	if (ret) {
++		aspeed_spi_enable(aspi, false);
+ 		dev_err(&pdev->dev, "spi_register_controller failed\n");
++	}
+ 
+ 	return ret;
+ }
+-- 
+2.50.1
