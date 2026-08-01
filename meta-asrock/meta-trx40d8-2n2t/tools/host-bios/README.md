@@ -8,6 +8,7 @@ not be proven. It never emits a candidate ROM.
 Required raw images:
 
 - ASRock Rack TRX40D8-2N2T `1.19F`
+- ASRock TRX40 Taichi `1.93`
 - Gigabyte TRX40 AORUS XTREME `F4`
 - Gigabyte TRX40 AORUS XTREME `F7g`
 - ASUS ROG Zenith II Extreme `2402`, with the 4 KiB ASUS capsule header removed
@@ -18,6 +19,7 @@ expected raw-image SHA-256 values are embedded in the script.
 ```sh
 ./analyze.py \
   --asrock /path/to/asrock-1.19f.raw \
+  --asrock-taichi-193 /path/to/TRX4TC1.93 \
   --gigabyte-f4 /path/to/TRX4AOXT.F4 \
   --gigabyte-f7g /path/to/TRX40AORUSXTREME.F7g \
   --asus-2402 /path/to/asus-2402.raw \
@@ -26,8 +28,15 @@ expected raw-image SHA-256 values are embedded in the script.
   --output /path/to/empty/output-directory
 ```
 
-The deep comparison extracts decompressed PE32 and TE bodies and consumes
-roughly 200 MiB. Pass `--skip-deep` for the faster structural comparison.
+The deep comparison extracts decompressed PE32 and TE bodies, reverses their
+image-base relocations with `pe_normalize.py`, and consumes roughly 200 MiB.
+This distinguishes code changes from firmware-volume placement changes. Pass
+`--skip-deep` for the faster structural comparison.
+
+`pe_normalize.py` also exposes `rebase_te()` for an explicitly located TE
+image. The caller must provide the adjusted in-memory data address and remains
+responsible for firmware-volume placement and enclosing checksums. This is a
+low-level validation primitive, not a BIOS builder.
 
 The safety gate must remain closed until all of these are available:
 

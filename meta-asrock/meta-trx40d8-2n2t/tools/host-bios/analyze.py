@@ -10,6 +10,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from pe_normalize import ExecutableFormatError, normalize_executable
+
 
 IMAGE_SIZE = 16 << 20
 MAGIC_OFFSET = 0x20000
@@ -18,6 +20,10 @@ EXPECTED = {
     "asrock": {
         "sha256": "f8a52cbba6b8000a8b300de019cbee0e034daf0d1919f34cf44767cd31708a01",
         "agesa": "CastlePeakPI-SP3r3-1.0.0.3",
+    },
+    "asrock-taichi-193": {
+        "sha256": "92f973224db6ff321eb9a30b47393d33134e2f957e7a3ee26c10647496328a7d",
+        "agesa": "CastlePeakPI-SP3r3-1.0.0.E",
     },
     "gigabyte-f4": {
         "sha256": "dad8a44f8120e9a4a3b4a0ef95c51e5aabafec782bef45523f4425916b41375a",
@@ -64,6 +70,10 @@ def sha256(path):
         for block in iter(lambda: stream.read(1 << 20), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def sha256_bytes(data):
+    return hashlib.sha256(data).hexdigest()
 
 
 def validate_image(label, path):
@@ -140,7 +150,11 @@ def hash_executables(dump_root):
         while parent != dump_root and parent not in file_nodes:
             parent = parent.parent
         if parent in file_nodes:
-            file_nodes[parent]["executables"].append(sha256(body))
+            try:
+                normalized = normalize_executable(body.read_bytes())
+            except ExecutableFormatError as error:
+                raise RuntimeError(f"cannot normalize {body}: {error}") from error
+            file_nodes[parent]["executables"].append(sha256_bytes(normalized))
 
     result = {}
     for item in file_nodes.values():
@@ -260,11 +274,11 @@ def render_markdown(result):
             f"{item['identical_crc32']} retained the same file CRC."
         )
     if result.get("executable_comparisons"):
-        lines.extend(["", "## Decompressed executable comparisons", ""])
+        lines.extend(["", "## Relocation-normalized executable comparisons", ""])
         for name, item in result["executable_comparisons"].items():
             lines.append(
                 f"- `{name}`: {item['changed_executables']} of {item['common_guids']} common executable GUIDs changed; "
-                f"{item['identical_executables']} are byte-identical after extraction."
+                f"{item['identical_executables']} are identical after undoing PE/TE image-base relocations."
             )
 
     lines.extend(
@@ -307,6 +321,7 @@ def render_markdown(result):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--asrock", required=True, type=Path)
+    parser.add_argument("--asrock-taichi-193", required=True, type=Path)
     parser.add_argument("--gigabyte-f4", required=True, type=Path)
     parser.add_argument("--gigabyte-f7g", required=True, type=Path)
     parser.add_argument("--asus-2402", required=True, type=Path)
@@ -318,6 +333,7 @@ def main():
 
     images = {
         "asrock": args.asrock.resolve(),
+        "asrock-taichi-193": args.asrock_taichi_193.resolve(),
         "gigabyte-f4": args.gigabyte_f4.resolve(),
         "gigabyte-f7g": args.gigabyte_f7g.resolve(),
         "asus-2402": args.asus_2402.resolve(),
@@ -371,8 +387,10 @@ def main():
         result["images"][label] = image_result
 
     pairs = (
+        ("asrock_to_asrock_taichi_193", "asrock", "asrock-taichi-193"),
         ("asrock_to_gigabyte_f4", "asrock", "gigabyte-f4"),
         ("asrock_to_gigabyte_f7g", "asrock", "gigabyte-f7g"),
+        ("asrock_taichi_193_to_gigabyte_f7g", "asrock-taichi-193", "gigabyte-f7g"),
         ("gigabyte_f4_to_f7g", "gigabyte-f4", "gigabyte-f7g"),
         ("gigabyte_f7g_to_asus_2402", "gigabyte-f7g", "asus-2402"),
     )
@@ -390,9 +408,10 @@ def main():
 
     result["candidate_permitted"] = False
     result["stop_reasons"] = [
+        "The same-vendor ASRock Taichi donor reduces OEM integration uncertainty, but it is a different board and still changes a broad UEFI module set.",
         "The same-board Gigabyte AGESA 1.0.0.5 to 1.0.0.F update changes hundreds of common UEFI modules, so AGESA is not an isolated replaceable payload.",
         "AGESA 1.0.0.F is coupled to a newer signed PSP bootloader, trusted OS, trustlets, driver bundle, SMU firmware, MP5 firmware, and chipset firmware.",
-        "All four boards have different APCB hashes; donor APCB data encodes board-specific memory and topology configuration and cannot replace the ASRock APCB.",
+        "Every donor has different APCB data; it encodes board-specific memory and topology configuration and cannot replace the ASRock Rack APCB.",
         "No vendor build manifest or matching CastlePeakPI source package proves a closed module set that combines ASRock board data with the donor firmware stack.",
     ]
 
