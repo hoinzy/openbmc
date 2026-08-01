@@ -67,6 +67,22 @@ After each read, repeat the idle checks above and only then power on the host.
 Confirm that POST, KVM video, SOL, the booted OS, sensors, and fan control are
 still functional.
 
+## Hardware validation
+
+On 2026-08-01, OpenBMC `3.1.0-dev-753-g87cedd150d` completed the full recovery
+rehearsal on a TRX40D8-2N2T running BIOS `L1.19F`:
+
+- Two independent read-only captures were exactly 16 MiB, contained
+  `aa55aa55` at `0x20000`, and matched byte-for-byte.
+- `flashcp` erased, wrote, and verified one captured stock image.
+- A third capture after the write matched both original captures byte-for-byte.
+- Every attach path ended with SPI1 unbound, no `bios` MTD device, an empty
+  driver override, and GPIOJ1 high, unclaimed, and configured as input.
+- The host completed POST and booted Ubuntu after both the read-only captures
+  and the write/readback rehearsal; SMBIOS continued to report `L1.19F`.
+
+No modified or donor-derived host firmware was written during this validation.
+
 ## Restore the captured stock image
 
 Only with the host off, copy one verified backup to the BMC and run:
@@ -78,7 +94,7 @@ bios-update.sh /tmp/trx40d8-host-bios-a.bin
 Do not interrupt BMC power during `flashcp`. Verify that SPI1 is idle before
 powering on the host. Keep the external programmer and original BMC recovery
 chip available until this path has completed a real read/write/readback
-rehearsal.
+rehearsal on the target board.
 
 ## AGESA experiment gate
 
