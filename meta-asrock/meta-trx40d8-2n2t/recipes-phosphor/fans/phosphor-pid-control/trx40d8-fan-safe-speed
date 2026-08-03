@@ -1,0 +1,33 @@
+#!/bin/sh
+
+set -eu
+
+# Keep chassis fans at or below 60% and the FAN2 pump at a fixed 50% even
+# while phosphor-pid-control is starting, stopping, or temporarily absent.
+attempt=0
+while [ "$attempt" -lt 100 ]; do
+    found=false
+    for hwmon in /sys/class/hwmon/hwmon*; do
+        [ -r "${hwmon}/name" ] || continue
+        [ "$(cat "${hwmon}/name")" = "aspeed_pwm_tacho" ] || continue
+
+        found=true
+        index=1
+        while [ "$index" -le 6 ]; do
+            pwm=${hwmon}/pwm${index}
+            if [ -e "$pwm" ]; then
+                value=153
+                [ "$index" -eq 2 ] && value=128
+                printf '%s\n' "$value" > "$pwm"
+            fi
+            index=$((index + 1))
+        done
+    done
+
+    [ "$found" = true ] && exit 0
+    attempt=$((attempt + 1))
+    sleep 0.1
+done
+
+echo "aspeed PWM controller did not appear" >&2
+exit 1
