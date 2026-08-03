@@ -1,0 +1,13 @@
+[Unit]
+Description=Apply TRX40D8 safe fan duties early
+DefaultDependencies=no
+After=local-fs.target
+Before=sysinit.target basic.target xyz.openbmc_project.fansensor.service phosphor-pid-control.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/trx40d8-fan-safe-speed
+RemainAfterExit=yes
+
+[Install]
+WantedBy=sysinit.target
