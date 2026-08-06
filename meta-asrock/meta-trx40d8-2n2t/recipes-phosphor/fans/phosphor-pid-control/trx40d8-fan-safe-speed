@@ -2,8 +2,8 @@
 
 set -eu
 
-# Keep chassis fans at or below 60% and the FAN2 pump at a fixed 50% even
-# while phosphor-pid-control is starting, stopping, or temporarily absent.
+# Keep every cooling output at its fail-safe duty while phosphor-pid-control is
+# starting, stopping, or temporarily absent.
 attempt=0
 while [ "$attempt" -lt 100 ]; do
     found=false
@@ -16,9 +16,7 @@ while [ "$attempt" -lt 100 ]; do
         while [ "$index" -le 6 ]; do
             pwm=${hwmon}/pwm${index}
             if [ -e "$pwm" ]; then
-                value=153
-                [ "$index" -eq 2 ] && value=128
-                printf '%s\n' "$value" > "$pwm"
+                printf '%s\n' 255 > "$pwm"
             fi
             index=$((index + 1))
         done
