@@ -4,6 +4,8 @@ Date: Tue, 11 Aug 2026 11:00:54 +0200
 Subject: [PATCH] phosphor-pid-control: interpolate stepwise control points
 
 Keep the existing Stepwise configuration and hysteresis contracts, but calculate a piecewise-linear output between adjacent points. Clamp below and above the configured range and cover interpolation in the controller tests.
+
+Upstream-Status: Pending [platform validation before upstream submission]
 ---
  pid/ec/stepwise.cpp                      | 36 +++++++++++++++++++-----
  test/pid_stepwisecontroller_unittest.cpp | 31 ++++++++++++++++----

@@ -4,6 +4,8 @@ Date: Fri, 31 Jul 2026 03:37:06 +0200
 Subject: [PATCH] webui-vue: add flexible TRX40 fan-control editor
 
 Expose selectable temperature sources and editable hysteresis alongside a variable two-to-twenty-point curve. Render and preview the response with piecewise-linear interpolation, allow pointer and keyboard dragging, retain precise numeric editing, and cover source persistence and curve math with unit tests.
+
+Upstream-Status: Inappropriate [TRX40D8-2N2T-specific fan UI and OEM API]
 ---
  .../AppNavigation/AppNavigationMixin.js       |   6 +
  src/locales/en-US.json                        |  38 +
