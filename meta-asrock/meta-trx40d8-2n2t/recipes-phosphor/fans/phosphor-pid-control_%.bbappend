@@ -12,6 +12,13 @@ PACKAGECONFIG:append:trx40d8-2n2t = " \
     offline-failsafe \
     "
 
+# Build the controller tests for this board so the piecewise-linear Stepwise
+# implementation is exercised with the same target flags and dependencies as
+# the daemon shipped in the image.
+DEPENDS:append:trx40d8-2n2t = " gtest"
+EXTRA_OEMESON:remove:trx40d8-2n2t = "-Dtests=disabled"
+EXTRA_OEMESON:append:trx40d8-2n2t = " -Dtests=enabled"
+
 inherit obmc-phosphor-systemd
 
 SYSTEMD_SERVICE:${PN}:trx40d8-2n2t = " \
