@@ -503,6 +503,7 @@
             "Name11": "NCT6796D_Temp12",
             "Name12": "CPU1_TEMP",
             "Name13": "NCT6796D_TSI1_TEMP",
+            "PowerState": "On",
             "Type": "NCT6779"
         },
         {"Name": "BMC", "Type": "BMC"},

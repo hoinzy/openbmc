@@ -14,8 +14,8 @@ Upstream-Status: Pending
 Signed-off-by: Till Heinzerling <1684934+hoinzy@users.noreply.github.com>
 ---
  arch/arm/boot/dts/aspeed/Makefile                         |  1 +
- .../dts/aspeed/aspeed-bmc-asrock-trx40d8-2n2t.dts         | 116 +++++++++++++++++++++
- 2 files changed, 117 insertions(+)
+ .../dts/aspeed/aspeed-bmc-asrock-trx40d8-2n2t.dts         | 111 +++++++++++++++++++++
+ 2 files changed, 112 insertions(+)
 
 diff --git a/arch/arm/boot/dts/aspeed/Makefile b/arch/arm/boot/dts/aspeed/Makefile
 index 371e5c0d0ce7..f76c9b609d8f 100644
@@ -33,14 +33,14 @@ new file mode 100644
 index 000000000000..000000000000
 --- /dev/null
 +++ b/arch/arm/boot/dts/aspeed/aspeed-bmc-asrock-trx40d8-2n2t.dts
-@@ -0,0 +1,116 @@
+@@ -0,0 +1,111 @@
 +// SPDX-License-Identifier: GPL-2.0+
 +/*
 + * Device tree for the ASRock Rack TRX40D8-2N2T.
 + *
 + * The board shares most of its AST2500 wiring with the X570D4U. The
-+ * verified board-specific differences are the location of the board EEPROM
-+ * and the NCT6796D hardware-monitoring interface.
++ * verified board-specific differences include the board EEPROM location and
++ * the GPIO and host-flash wiring documented below.
 + */
 +#include "aspeed-bmc-asrock-x570d4u.dts"
 +#include <dt-bindings/interrupt-controller/irq.h>
@@ -114,11 +114,6 @@ index 000000000000..000000000000
 +
 +&i2c1 {
 +	/delete-node/ w83773g@4c;
-+
-+	nct6796@2d {
-+		compatible = "nuvoton,nct6796";
-+		reg = <0x2d>;
-+	};
 +
 +	eeprom@57 {
 +		compatible = "st,24c128", "atmel,24c128";
