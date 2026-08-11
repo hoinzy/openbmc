@@ -1,11 +1,25 @@
 {
     "InactivityTimeout": 1800,
+    "ReservedUDCs": [
+        "1e6a0000.usb-vhub:p1",
+        "1e6a0000.usb-vhub:p2"
+    ],
     "MountPoints": {
         "Slot_1": {
             "EndpointId": "",
             "Mode": 1,
             "NBDDevice": "nbd1",
             "UnixSocket": "/run/virtual-media/nbd1.sock",
+            "UDC": "1e6a0000.usb-vhub:p3",
+            "Timeout": 90,
+            "BlockSize": 512
+        },
+        "Slot_2": {
+            "EndpointId": "",
+            "Mode": 1,
+            "NBDDevice": "nbd2",
+            "UnixSocket": "/run/virtual-media/nbd2.sock",
+            "UDC": "1e6a0000.usb-vhub:p4",
             "Timeout": 90,
             "BlockSize": 512
         }

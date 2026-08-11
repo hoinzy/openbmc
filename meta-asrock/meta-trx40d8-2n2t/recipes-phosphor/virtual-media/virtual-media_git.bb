@@ -11,6 +11,7 @@ SRC_URI = " \
     file://0002-virtual-media-list-images-on-SMB-and-NFS-shares.patch \
     file://0003-virtual-media-use-Boost.Process-v1-compatibility-API.patch \
     file://0004-virtual-media-update-for-current-sdbusplus-and-Boost.patch \
+    file://0005-virtual-media-assign-and-validate-USB-controllers.patch \
     file://virtual-media.json \
     "
 SRCREV = "1306c2132bdb9d5ad6deb00cd8a1d920753f7ea7"
@@ -19,6 +20,7 @@ PV = "0.1+git${SRCPV}"
 
 DEPENDS = " \
     boost \
+    gtest \
     nlohmann-json \
     sdbusplus \
     systemd \
@@ -39,7 +41,7 @@ bindir = "${sbindir}"
 
 EXTRA_OEMESON = " \
     -Dlegacy-mode=enabled \
-    -Dtests=disabled \
+    -Dtests=enabled \
     "
 
 SYSTEMD_SERVICE:${PN} = "xyz.openbmc_project.VirtualMedia.service"
