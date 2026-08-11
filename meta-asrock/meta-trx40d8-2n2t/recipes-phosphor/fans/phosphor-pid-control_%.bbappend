@@ -2,6 +2,7 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
 SRC_URI:append:trx40d8-2n2t = " \
     file://0001-dbus-keep-missing-acceptable-for-fan-pwm-pairs.patch \
+    file://0002-stepwise-interpolate-control-points.patch \
     file://trx40d8-fan-safe-speed \
     file://trx40d8-fan-safe-start.service \
     "

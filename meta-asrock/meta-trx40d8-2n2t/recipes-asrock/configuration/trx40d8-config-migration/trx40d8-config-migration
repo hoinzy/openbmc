@@ -3,8 +3,8 @@
 # Entity Manager persists writable properties by copying its complete source
 # JSON into the JFFS2 overlay.  That copy can mask newly shipped board fields
 # after an image update.  On a schema-version change, preserve the writable
-# TR1 curve, refresh the upper copy in place, and restore the curve before fan
-# control starts.
+# TR1 curve settings, refresh the upper copy in place, and restore the settings
+# before fan control starts.
 
 set -eu
 
@@ -52,8 +52,39 @@ fi
 
 mkdir -p "$runtime_dir"
 
+capture_inputs()
+{
+    busctl get-property "$service" "$object" "$interface" Inputs \
+        > "${runtime_dir}/Inputs" 2>/dev/null || return 1
+
+    read -r input_signature input_count _ < "${runtime_dir}/Inputs"
+    if [ "$input_signature" != as ]; then
+        return 1
+    fi
+    case "$input_count" in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+
+    # D-Bus sensor names may contain spaces.  Extract every quoted array item
+    # onto its own line without evaluating the property text as shell code.
+    awk '
+        {
+            line = $0
+            sub(/^[^ ]+ [0-9]+ */, "", line)
+            while (match(line, /"[^"]*"/)) {
+                print substr(line, RSTART + 1, RLENGTH - 2)
+                line = substr(line, RSTART + RLENGTH)
+            }
+        }
+    ' "${runtime_dir}/Inputs" > "${runtime_dir}/InputValues"
+
+    parsed_input_count=$(wc -l < "${runtime_dir}/InputValues")
+    [ "$parsed_input_count" -eq "$input_count" ]
+}
+
 capture_curve()
 {
+    capture_inputs &&
     busctl get-property "$service" "$object" "$interface" Reading \
         > "${runtime_dir}/Reading" 2>/dev/null &&
     busctl get-property "$service" "$object" "$interface" Output \
@@ -117,11 +148,21 @@ restore_property()
 {
     property=$1
     # busctl emits the signature followed by its argument count and values;
-    # that is also the input form accepted by set-property.
+    # that is also the input form accepted by set-property for numeric values.
     set -- $(cat "${runtime_dir}/${property}")
     busctl set-property "$service" "$object" "$interface" "$property" "$@"
 }
 
+restore_inputs()
+{
+    set -- as "$input_count"
+    while IFS= read -r input_value; do
+        set -- "$@" "$input_value"
+    done < "${runtime_dir}/InputValues"
+    busctl set-property "$service" "$object" "$interface" Inputs "$@"
+}
+
+restore_inputs
 restore_property Reading
 restore_property Output
 restore_property PositiveHysteresis
@@ -129,4 +170,4 @@ restore_property NegativeHysteresis
 
 printf '%s\n' "$target_version" > "$state_file"
 logger -t trx40d8-config-migration \
-    "migrated board configuration schema to version ${target_version} and restored the TR1 fan curve"
+    "migrated board configuration schema to version ${target_version} and restored the TR1 fan settings"

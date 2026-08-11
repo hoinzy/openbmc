@@ -73,13 +73,16 @@ missing-acceptable so that they do not create a fail-safe log storm. FAN1 and
 FAN3 retain tach-based failure protection. Detailed PWM, RPM, temperature, and
 service-lifecycle evidence is in `docs/live-evidence.md`.
 
-The WebUI exposes the editor at `/hardware-status/fan-control`. Entity Manager
-stores its curve edits in the writable flash overlay. The
-board's versioned `trx40d8-config-migration.service` refreshes that persistent
-copy when a firmware image changes the configuration schema, while preserving
-and restoring the user curve before fan control starts. Increment
-`config-schema-version` whenever the packaged board JSON gains fields that an
-older persistent copy would mask.
+The WebUI exposes the editor at `/hardware-status/fan-control`. Two to twenty
+temperature/output points form a continuous, piecewise-linear response and can
+be dragged on the chart. The required temperature sources and rising/falling
+hysteresis are configurable alongside the curve. Entity Manager stores those
+settings in the writable flash overlay. The board's versioned
+`trx40d8-config-migration.service` refreshes that persistent copy when a
+firmware image changes the configuration schema, while preserving and restoring
+the user settings before fan control starts. Increment `config-schema-version`
+whenever the packaged board JSON gains fields that an older persistent copy
+would mask.
 
 Do not flash this build until the stock 64 MiB flash has been read twice with
 an external programmer, both reads match, UART is connected, and a recovery
