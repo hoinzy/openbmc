@@ -3,6 +3,8 @@ From: Codex <codex@openai.com>
 Date: Tue, 11 Aug 2026 16:20:00 +0200
 Subject: [PATCH] virtual-media: fix server-backed NBD lifetime
 
+Upstream-Status: Pending [requires hardware validation on current NBD stack]
+
 The nbd-client nofork mode returns ESHUTDOWN for every read with the
 kernel/client combination used by trx40d8-2n2t.  Let nbd-client daemonize for
 legacy nbdkit-backed media and keep nbdkit's --run command alive by polling the
