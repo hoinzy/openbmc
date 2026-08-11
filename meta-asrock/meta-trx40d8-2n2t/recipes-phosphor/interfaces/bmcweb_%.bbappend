@@ -2,6 +2,8 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
 DEPENDS:append:trx40d8-2n2t = " phosphor-dbus-interfaces"
 
+PACKAGECONFIG:remove:trx40d8-2n2t = "vm-websocket"
+
 SRC_URI:append:trx40d8-2n2t = " \
     file://0001-bmcweb-add-AMI-host-inventory-routes.patch \
     file://0002-bmcweb-expose-bios-settings-manager.patch \

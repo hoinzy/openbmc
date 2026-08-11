@@ -58,9 +58,11 @@ board-specific upload-size override.
 ## Cooling state
 
 The board starts `phosphor-pid-control` independently of host power state and
-drives all six PWM channels from the TR1 water-temperature curve. A missing or
-unhealthy TR1 input selects the 100% zone fail-safe. The populated cooling
-headers have been validated live at both full duty and a 30% curve target:
+drives all six PWM channels from the browser-editable TR1 water-temperature
+curve. The curve has a 30% controller floor and the packaged default spans 50%
+through 100%; it is not capped at a constant duty. A missing or unhealthy TR1
+input selects the 100% zone fail-safe. The populated cooling headers have been
+validated live at both full duty and a 30% curve target:
 
 - FAN1: top radiator fan group; tach 1 is populated
 - FAN2: water pump; no tach is reported by the vendor firmware
@@ -71,12 +73,16 @@ missing-acceptable so that they do not create a fail-safe log storm. FAN1 and
 FAN3 retain tach-based failure protection. Detailed PWM, RPM, temperature, and
 service-lifecycle evidence is in `docs/live-evidence.md`.
 
-Entity Manager stores WebUI curve edits in the writable flash overlay. The
-board's versioned `trx40d8-config-migration.service` refreshes that persistent
-copy when a firmware image changes the configuration schema, while preserving
-and restoring the user curve before fan control starts. Increment
-`config-schema-version` whenever the packaged board JSON gains fields that an
-older persistent copy would mask.
+The WebUI exposes the editor at `/hardware-status/fan-control`. Two to twenty
+temperature/output points form a continuous, piecewise-linear response and can
+be dragged on the chart. The required temperature sources and rising/falling
+hysteresis are configurable alongside the curve. Entity Manager stores those
+settings in the writable flash overlay. The board's versioned
+`trx40d8-config-migration.service` refreshes that persistent copy when a
+firmware image changes the configuration schema, while preserving and restoring
+the user settings before fan control starts. Increment `config-schema-version`
+whenever the packaged board JSON gains fields that an older persistent copy
+would mask.
 
 Do not flash this build until the stock 64 MiB flash has been read twice with
 an external programmer, both reads match, UART is connected, and a recovery

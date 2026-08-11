@@ -1,0 +1,381 @@
+From 8fcd61cefc42c4e003ca0e9520973277ac2a77a8 Mon Sep 17 00:00:00 2001
+From: Till Heinzerling <till.heinzerling1@vodafone.com>
+Date: Tue, 11 Aug 2026 15:36:10 +0200
+Subject: [PATCH] virtual-media: assign and validate USB controllers
+
+Allow each mount point to request an explicit UDC and let the configuration
+reserve controllers used by other gadget owners. Determine runtime occupancy
+from configfs UDC bindings instead of the obsolete usb-vhub suspended path,
+reject unavailable or duplicate assignments, and cover reservation, busy,
+simultaneous-slot, teardown, and reuse behavior with unit tests.
+
+Upstream-Status: Pending
+Signed-off-by: Till Heinzerling <1684934+hoinzy@users.noreply.github.com>
+
+---
+ src/configuration.hpp |  58 ++++++++++++++++++++-
+ src/resources.cpp     |   3 +-
+ src/system.hpp        | 117 ++++++++++++++++++++++++++++++++++++------
+ tests/src/main.cpp    |  60 ++++++++++++++++++++++
+ 4 files changed, 219 insertions(+), 19 deletions(-)
+
+diff --git a/src/configuration.hpp b/src/configuration.hpp
+index efdddf2..f6d7fb4 100644
+--- a/src/configuration.hpp
++++ b/src/configuration.hpp
+@@ -10,6 +10,7 @@
+ #include <iostream>
+ #include <nlohmann/json.hpp>
+ #include <optional>
++#include <set>
+ #include <string>
+ #include <vector>
+ 
+@@ -40,6 +41,8 @@ class Configuration
+         std::string endPointId;
+         std::optional<int> timeout;
+         std::optional<int> blocksize;
++        std::optional<std::string> udc;
++        std::set<std::string> reservedUdcs;
+         std::chrono::seconds remainingInactivityTimeout;
+         Mode mode;
+ 
+@@ -88,7 +91,10 @@ class Configuration
+         try
+         {
+             auto data = nlohmann::json::parse(configFile, nullptr);
+-            setupVariables(data);
++            if (!setupVariables(data))
++            {
++                return false;
++            }
+         }
+         catch (nlohmann::json::exception& e)
+         {
+@@ -105,6 +111,30 @@ class Configuration
+ 
+     bool setupVariables(const nlohmann::json& config)
+     {
++        std::set<std::string> reservedUdcs;
++        std::set<std::string> configuredUdcs;
++
++        const auto reservedIter = config.find("ReservedUDCs");
++        if (reservedIter != config.cend())
++        {
++            if (!reservedIter->is_array())
++            {
++                LogMsg(Logger::Error, "ReservedUDCs must be an array");
++                return false;
++            }
++            for (const auto& value : *reservedIter)
++            {
++                const std::string* udc = value.get_ptr<const std::string*>();
++                if (udc == nullptr || udc->empty())
++                {
++                    LogMsg(Logger::Error,
++                           "ReservedUDCs entries must be non-empty strings");
++                    return false;
++                }
++                reservedUdcs.insert(*udc);
++            }
++        }
++
+         inactivityTimeout =
+             std::chrono::seconds(config.value("InactivityTimeout", 0));
+         if (inactivityTimeout == std::chrono::seconds(0))
+@@ -119,6 +149,7 @@ class Configuration
+                 for (const auto& mountpoint : item.value().items())
+                 {
+                     MountPoint mp;
++                    mp.reservedUdcs = reservedUdcs;
+                     const auto nbdDeviceIter =
+                         mountpoint.value().find("NBDDevice");
+                     if (nbdDeviceIter != mountpoint.value().cend())
+@@ -207,6 +238,24 @@ class Configuration
+                                    "BlockSize not set, use default");
+                         }
+                     }
++                    const auto udcIter = mountpoint.value().find("UDC");
++                    if (udcIter != mountpoint.value().cend())
++                    {
++                        const std::string* value =
++                            udcIter->get_ptr<const std::string*>();
++                        if (value == nullptr || value->empty())
++                        {
++                            LogMsg(Logger::Error,
++                                   "UDC must be a non-empty string");
++                            return false;
++                        }
++                        if (reservedUdcs.contains(*value))
++                        {
++                            LogMsg(Logger::Error, "UDC is reserved: ", *value);
++                            return false;
++                        }
++                        mp.udc = *value;
++                    }
+                     const auto modeIter = mountpoint.value().find("Mode");
+                     if (modeIter != mountpoint.value().cend())
+                     {
+@@ -244,6 +293,13 @@ class Configuration
+                                "Mode does not exist, skip this mount point");
+                         continue;
+                     }
++                    if (mp.udc && !configuredUdcs.insert(*mp.udc).second)
++                    {
++                        LogMsg(Logger::Error,
++                               "UDC configured by more than one mount point: ",
++                               *mp.udc);
++                        return false;
++                    }
+                     mountPoints[mountpoint.key()] = std::move(mp);
+                 }
+             }
+diff --git a/src/resources.cpp b/src/resources.cpp
+index a501bba..7287676 100644
+--- a/src/resources.cpp
++++ b/src/resources.cpp
+@@ -23,7 +23,8 @@ Gadget::Gadget(interfaces::MountPointStateMachine& machine,
+ {
+     status = UsbGadget::configure(
+         std::string(machine.getName()), machine.getConfig().nbdDevice, devState,
+-        machine.getTarget() ? machine.getTarget()->rw : false);
++        machine.getTarget() ? machine.getTarget()->rw : false,
++        machine.getConfig().udc, machine.getConfig().reservedUdcs);
+ }
+ 
+ Gadget::~Gadget()
+diff --git a/src/system.hpp b/src/system.hpp
+index 9839c36..b266ba6 100644
+--- a/src/system.hpp
++++ b/src/system.hpp
+@@ -10,7 +10,11 @@
+ #include <boost/process/v1.hpp>
+ #include <filesystem>
+ #include <fstream>
++#include <optional>
+ #include <sdbusplus/asio/object_server.hpp>
++#include <set>
++#include <string>
++#include <vector>
+ 
+ namespace fs = std::filesystem;
+ 
+@@ -497,22 +501,102 @@ class FsHelper
+ struct UsbGadget : private FsHelper
+ {
+   private:
++    static constexpr const char* gadgetRoot =
++        "/sys/kernel/config/usb_gadget";
++    static constexpr const char* vhubRoot =
++        "/sys/bus/platform/devices/1e6a0000.usb-vhub";
++
+     static const std::string getGadgetDirPrefix()
+     {
+         const std::string gadgetDirPrefix =
+-            "/sys/kernel/config/usb_gadget/mass-storage-";
++            std::string(gadgetRoot) + "/mass-storage-";
+         return gadgetDirPrefix;
+     }
+ 
++    static std::vector<std::string> getUdcCandidates()
++    {
++        std::vector<std::string> candidates;
++        std::error_code ec;
++        for (const auto& port : fs::directory_iterator(vhubRoot, ec))
++        {
++            if (ec)
++            {
++                break;
++            }
++            if (port.is_directory(ec) && !port.is_symlink(ec))
++            {
++                candidates.emplace_back(port.path().filename());
++            }
++        }
++        std::sort(candidates.begin(), candidates.end());
++        return candidates;
++    }
++
++    static std::set<std::string> getOccupiedUdcs()
++    {
++        std::set<std::string> occupied;
++        std::error_code ec;
++        for (const auto& gadget : fs::directory_iterator(gadgetRoot, ec))
++        {
++            if (ec)
++            {
++                break;
++            }
++            std::ifstream udcFile(gadget.path() / "UDC");
++            std::string udc;
++            if (std::getline(udcFile, udc) && !udc.empty())
++            {
++                occupied.insert(std::move(udc));
++            }
++        }
++        return occupied;
++    }
++
+   public:
++    static std::optional<std::string>
++        selectUdc(const std::optional<std::string>& requested,
++                  const std::vector<std::string>& candidates,
++                  const std::set<std::string>& occupied,
++                  const std::set<std::string>& reserved)
++    {
++        const auto usable = [&](const std::string& udc) {
++            return std::find(candidates.begin(), candidates.end(), udc) !=
++                       candidates.end() &&
++                   !occupied.contains(udc) && !reserved.contains(udc);
++        };
++
++        if (requested)
++        {
++            if (usable(*requested))
++            {
++                return requested;
++            }
++            return std::nullopt;
++        }
++
++        auto sorted = candidates;
++        std::sort(sorted.begin(), sorted.end());
++        const auto selected = std::find_if(sorted.begin(), sorted.end(), usable);
++        if (selected == sorted.end())
++        {
++            return std::nullopt;
++        }
++        return *selected;
++    }
++
+     static int32_t configure(const std::string& name, const NBDDevice& nbd,
+-                             StateChange change, const bool rw = false)
++                             StateChange change, const bool rw = false,
++                             std::optional<std::string> udc = std::nullopt,
++                             std::set<std::string> reservedUdcs = {})
+     {
+-        return configure(name, nbd.to_path(), change, rw);
++        return configure(name, nbd.to_path(), change, rw, std::move(udc),
++                         std::move(reservedUdcs));
+     }
+ 
+     static int32_t configure(const std::string& name, const fs::path& path,
+-                             StateChange change, const bool rw = false)
++                             StateChange change, const bool rw = false,
++                             std::optional<std::string> udc = std::nullopt,
++                             std::set<std::string> reservedUdcs = {})
+     {
+         LogMsg(Logger::Info, "[App]: Configure USB Gadget (name=", name,
+                ", path=", path, ", State=", static_cast<uint32_t>(change), ")");
+@@ -535,6 +619,15 @@ struct UsbGadget : private FsHelper
+ 
+         if (change == StateChange::inserted)
+         {
++            const auto selectedUdc =
++                selectUdc(udc, getUdcCandidates(), getOccupiedUdcs(),
++                          reservedUdcs);
++            if (!selectedUdc)
++            {
++                LogMsg(Logger::Error,
++                       "[App]: No eligible USB device controller for ", name);
++                return -1;
++            }
+             try
+             {
+                 fs::create_directories(gadgetDir);
+@@ -554,19 +647,9 @@ struct UsbGadget : private FsHelper
+                 echoToFile(funcMassStorageDir / "lun.0/cdrom", "0");
+                 echoToFile(funcMassStorageDir / "lun.0/file", path);
+ 
+-                for (const auto& port : fs::directory_iterator(
+-                         "/sys/bus/platform/devices/1e6a0000.usb-vhub"))
+-                {
+-                    if (fs::is_directory(port) && !fs::is_symlink(port) &&
+-                        !fs::exists(port.path() / "gadget/suspended"))
+-                    {
+-                        const std::string portId = port.path().filename();
+-                        LogMsg(Logger::Debug,
+-                               "Use port : ", port.path().filename());
+-                        echoToFile(gadgetDir / "UDC", portId);
+-                        return 0;
+-                    }
+-                }
++                LogMsg(Logger::Debug, "Use port : ", *selectedUdc);
++                echoToFile(gadgetDir / "UDC", *selectedUdc);
++                return 0;
+             }
+             catch (fs::filesystem_error& e)
+             {
+diff --git a/tests/src/main.cpp b/tests/src/main.cpp
+index 9bb465e..e075fec 100644
+--- a/tests/src/main.cpp
++++ b/tests/src/main.cpp
+@@ -1,5 +1,65 @@
++#include "system.hpp"
++
+ #include <gtest/gtest.h>
+ 
++#include <optional>
++#include <set>
++#include <string>
++#include <vector>
++
++TEST(UsbGadgetUdcSelection, ReservedAndBusyPortsAreExcluded)
++{
++    const std::vector<std::string> candidates = {
++        "1e6a0000.usb-vhub:p1", "1e6a0000.usb-vhub:p2",
++        "1e6a0000.usb-vhub:p3"};
++    const std::set<std::string> occupied = {"1e6a0000.usb-vhub:p2"};
++    const std::set<std::string> reserved = {"1e6a0000.usb-vhub:p1"};
++
++    EXPECT_EQ(UsbGadget::selectUdc(std::nullopt, candidates, occupied,
++                                  reserved),
++              std::optional<std::string>{"1e6a0000.usb-vhub:p3"});
++    EXPECT_FALSE(UsbGadget::selectUdc(
++        std::optional<std::string>{"1e6a0000.usb-vhub:p1"}, candidates,
++        occupied, reserved));
++    EXPECT_FALSE(UsbGadget::selectUdc(
++        std::optional<std::string>{"1e6a0000.usb-vhub:p2"}, candidates,
++        occupied, reserved));
++}
++
++TEST(UsbGadgetUdcSelection, TwoSlotsAreUniqueAndReleasedPortIsReusable)
++{
++    const std::vector<std::string> candidates = {
++        "1e6a0000.usb-vhub:p1", "1e6a0000.usb-vhub:p2",
++        "1e6a0000.usb-vhub:p3", "1e6a0000.usb-vhub:p4",
++        "1e6a0000.usb-vhub:p5"};
++    const std::set<std::string> reserved = {
++        "1e6a0000.usb-vhub:p1", "1e6a0000.usb-vhub:p2"};
++    std::set<std::string> occupied;
++
++    const auto slot1 = UsbGadget::selectUdc(
++        std::optional<std::string>{"1e6a0000.usb-vhub:p3"}, candidates,
++        occupied, reserved);
++    ASSERT_TRUE(slot1);
++    occupied.insert(*slot1);
++
++    const auto slot2 = UsbGadget::selectUdc(
++        std::optional<std::string>{"1e6a0000.usb-vhub:p4"}, candidates,
++        occupied, reserved);
++    ASSERT_TRUE(slot2);
++    EXPECT_NE(slot1, slot2);
++    occupied.insert(*slot2);
++
++    EXPECT_FALSE(UsbGadget::selectUdc(
++        std::optional<std::string>{"1e6a0000.usb-vhub:p3"}, candidates,
++        occupied, reserved));
++
++    occupied.erase(*slot1);
++    EXPECT_EQ(UsbGadget::selectUdc(
++                  std::optional<std::string>{"1e6a0000.usb-vhub:p3"},
++                  candidates, occupied, reserved),
++              slot1);
++}
++
+ int main(int argc, char** argv)
+ {
+     ::testing::InitGoogleTest(&argc, argv);
+-- 
+2.55.0
+

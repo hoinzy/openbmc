@@ -307,7 +307,7 @@
             "Inputs": ["FAN1_1"],
             "Name": "FAN1 Control",
             "NegativeHysteresis": 0.0,
-            "OutLimitMax": 60.0,
+            "OutLimitMax": 100.0,
             "OutLimitMin": 30.0,
             "Outputs": ["Pwm_1"],
             "PCoefficient": 0.0,
@@ -328,8 +328,8 @@
             "MissingIsAcceptable": ["FAN2_1"],
             "Name": "FAN2 Pump Control",
             "NegativeHysteresis": 0.0,
-            "OutLimitMax": 50.0,
-            "OutLimitMin": 50.0,
+            "OutLimitMax": 100.0,
+            "OutLimitMin": 30.0,
             "Outputs": ["Pwm_2"],
             "PCoefficient": 0.0,
             "PositiveHysteresis": 0.0,
@@ -348,7 +348,7 @@
             "Inputs": ["FAN3_1"],
             "Name": "FAN3 Control",
             "NegativeHysteresis": 0.0,
-            "OutLimitMax": 60.0,
+            "OutLimitMax": 100.0,
             "OutLimitMin": 30.0,
             "Outputs": ["Pwm_3"],
             "PCoefficient": 0.0,
@@ -369,7 +369,7 @@
             "MissingIsAcceptable": ["FAN4_1", "FAN4_2"],
             "Name": "FAN4 Control",
             "NegativeHysteresis": 0.0,
-            "OutLimitMax": 60.0,
+            "OutLimitMax": 100.0,
             "OutLimitMin": 30.0,
             "Outputs": ["Pwm_4"],
             "PCoefficient": 0.0,
@@ -390,7 +390,7 @@
             "MissingIsAcceptable": ["FAN5_1", "FAN5_2"],
             "Name": "FAN5 Control",
             "NegativeHysteresis": 0.0,
-            "OutLimitMax": 60.0,
+            "OutLimitMax": 100.0,
             "OutLimitMin": 30.0,
             "Outputs": ["Pwm_6"],
             "PCoefficient": 0.0,
@@ -411,7 +411,7 @@
             "MissingIsAcceptable": ["FAN6_1", "FAN6_2"],
             "Name": "FAN6 Control",
             "NegativeHysteresis": 0.0,
-            "OutLimitMax": 60.0,
+            "OutLimitMax": 100.0,
             "OutLimitMin": 30.0,
             "Outputs": ["Pwm_5"],
             "PCoefficient": 0.0,
@@ -426,7 +426,7 @@
             "Inputs": ["TR1_TEMP"],
             "Name": "TR1 Fan Curve",
             "NegativeHysteresis": 0.5,
-            "Output": [50.0, 55.0, 60.0, 60.0, 60.0, 60.0, 60.0],
+            "Output": [50.0, 55.0, 60.0, 70.0, 80.0, 90.0, 100.0],
             "PositiveHysteresis": 0.5,
             "Reading": [20.0, 25.0, 30.0, 35.0, 40.0, 45.0, 50.0],
             "Type": "Stepwise",
@@ -440,37 +440,37 @@
             ]
         },
         {
-            "FailSafePercent": 60.0,
+            "FailSafePercent": 100.0,
             "MinThermalOutput": 30.0,
             "Name": "FAN1 Zone",
             "Type": "Pid.Zone"
         },
         {
-            "FailSafePercent": 50.0,
-            "MinThermalOutput": 50.0,
+            "FailSafePercent": 100.0,
+            "MinThermalOutput": 30.0,
             "Name": "FAN2 Zone",
             "Type": "Pid.Zone"
         },
         {
-            "FailSafePercent": 60.0,
+            "FailSafePercent": 100.0,
             "MinThermalOutput": 30.0,
             "Name": "FAN3 Zone",
             "Type": "Pid.Zone"
         },
         {
-            "FailSafePercent": 60.0,
+            "FailSafePercent": 100.0,
             "MinThermalOutput": 30.0,
             "Name": "FAN4 Zone",
             "Type": "Pid.Zone"
         },
         {
-            "FailSafePercent": 60.0,
+            "FailSafePercent": 100.0,
             "MinThermalOutput": 30.0,
             "Name": "FAN5 Zone",
             "Type": "Pid.Zone"
         },
         {
-            "FailSafePercent": 60.0,
+            "FailSafePercent": 100.0,
             "MinThermalOutput": 30.0,
             "Name": "FAN6 Zone",
             "Type": "Pid.Zone"
@@ -503,7 +503,8 @@
             "Name11": "NCT6796D_Temp12",
             "Name12": "CPU1_TEMP",
             "Name13": "NCT6796D_TSI1_TEMP",
-            "Type": "NCT6779"
+            "PowerState": "On",
+            "Type": "NCT6796"
         },
         {"Name": "BMC", "Type": "BMC"},
         {

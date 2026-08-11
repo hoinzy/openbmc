@@ -1,27 +1,30 @@
-From e9fbd4b0362f27c2c4d5a51563ee040d4766beb8 Mon Sep 17 00:00:00 2001
+From 2254f71aea2bc06bfbcf48f5232e2dd2bde3986c Mon Sep 17 00:00:00 2001
 From: hoinzy <1684934+hoinzy@users.noreply.github.com>
 Date: Fri, 31 Jul 2026 03:37:06 +0200
-Subject: [PATCH] webui-vue: add TR1 fan curve editor
+Subject: [PATCH] webui-vue: add flexible TRX40 fan-control editor
 
-Upstream-Status: Inappropriate [board-specific TR1 fan control]
+Expose selectable temperature sources and editable hysteresis alongside a variable two-to-twenty-point curve. Render and preview the response with piecewise-linear interpolation, allow pointer and keyboard dragging, retain precise numeric editing, and cover source persistence and curve math with unit tests.
 
-Signed-off-by: hoinzy <1684934+hoinzy@users.noreply.github.com>
-
+Upstream-Status: Inappropriate [TRX40D8-2N2T-specific fan UI and OEM API]
 ---
  .../AppNavigation/AppNavigationMixin.js       |   6 +
- src/locales/en-US.json                        |  24 +
+ src/locales/en-US.json                        |  38 +
  src/router/routes.js                          |  10 +
  src/store/index.js                            |   2 +
- .../modules/HardwareStatus/FanControlStore.js | 113 +++++
- .../HardwareStatus/FanControl/FanControl.vue  | 462 ++++++++++++++++++
+ .../modules/HardwareStatus/FanControlStore.js | 234 ++++++
+ .../HardwareStatus/FanControl/FanControl.vue  | 778 ++++++++++++++++++
+ .../HardwareStatus/FanControl/fanCurve.js     | 125 +++
  src/views/HardwareStatus/FanControl/index.js  |   2 +
  .../__snapshots__/AppNavigation.spec.js.snap  |  24 +
- .../FanControl/FanControlStore.spec.js        | 117 +++++
- 9 files changed, 760 insertions(+)
+ .../FanControl/FanControlStore.spec.js        | 188 +++++
+ .../FanControl/FanCurve.spec.js               |  60 ++
+ 11 files changed, 1467 insertions(+)
  create mode 100644 src/store/modules/HardwareStatus/FanControlStore.js
  create mode 100644 src/views/HardwareStatus/FanControl/FanControl.vue
+ create mode 100644 src/views/HardwareStatus/FanControl/fanCurve.js
  create mode 100644 src/views/HardwareStatus/FanControl/index.js
  create mode 100644 tests/unit/views/HardwareStatus/FanControl/FanControlStore.spec.js
+ create mode 100644 tests/unit/views/HardwareStatus/FanControl/FanCurve.spec.js
 
 diff --git a/src/components/AppNavigation/AppNavigationMixin.js b/src/components/AppNavigation/AppNavigationMixin.js
 index 99db3e8..a2e8c16 100644
@@ -41,7 +44,7 @@ index 99db3e8..a2e8c16 100644
          },
          {
 diff --git a/src/locales/en-US.json b/src/locales/en-US.json
-index 7ad2eff..9f48e05 100644
+index 7ad2eff..c577c35 100644
 --- a/src/locales/en-US.json
 +++ b/src/locales/en-US.json
 @@ -126,6 +126,7 @@
@@ -60,30 +63,44 @@ index 7ad2eff..9f48e05 100644
          "firmware": "Firmware",
          "inventory": "Inventory and LEDs",
          "kvm": "KVM",
-@@ -903,6 +905,28 @@
+@@ -903,6 +905,42 @@
              "upperCritical": "Upper critical"
          }
      },
 +    "pageFanControl": {
-+        "description": "Configure the fan and pump response to the TR1 water-temperature sensor.",
-+        "curveTitle": "TR1 temperature curve",
-+        "curveDescription": "Each point sets the fan and pump output at that temperature. Hysteresis prevents rapid switching near a threshold.",
-+        "currentTemperature": "Current TR1 temperature",
-+        "currentTarget": "Current curve target",
-+        "temperatureAxis": "TR1 temperature (°C)",
++        "description": "Configure which temperature sensors control the fans and pump, and shape their response curve.",
++        "curveTitle": "Fan response curve",
++        "curveDescription": "Output is interpolated smoothly between control points instead of jumping at temperature boundaries.",
++        "dragHint": "Drag a point to reshape the curve, use the arrow keys for precise movement, or double-click the chart to add a point.",
++        "currentTemperature": "Highest selected temperature",
++        "currentTarget": "Interpolated curve target",
++        "temperatureAxis": "Control temperature (°C)",
 +        "outputAxis": "Fan and pump output (%)",
++        "pointEditorTitle": "Control points",
++        "pointEditorDescription": "The numeric fields provide precise editing. The final point remains at 100% as the high-temperature endpoint.",
 +        "pointColumn": "Point",
++        "actions": "Actions",
++        "addPoint": "Add control point",
++        "removePoint": "Remove",
 +        "temperature": "Temperature (°C)",
 +        "output": "Output (%)",
++        "sourceTitle": "Temperature sources",
++        "sourceDescription": "Select one or more required sources. The highest available reading drives the curve.",
++        "noSources": "No temperature sensors were discovered.",
++        "sourceValidation": "Select at least one temperature source.",
++        "sourceUnavailable": "A selected source has no reading. Fan control will use its 100% fail-safe until every required source is available.",
++        "hysteresisTitle": "Hysteresis",
++        "hysteresisDescription": "Set either value to 0 for immediate continuous response, or add a small dead band to avoid reacting to sensor noise.",
 +        "positiveHysteresis": "Rising hysteresis",
 +        "negativeHysteresis": "Falling hysteresis",
-+        "controlledOutputs": "This curve controls FAN1 through FAN6, including the pump on FAN2. Loss of TR1 or a required fan tachometer selects the 100% fail-safe; telemetry-free channels follow the curve.",
-+        "validation": "Temperatures must increase from left to right, and outputs must not decrease. Output must remain between 30% and 100%, and the final point must be 100%.",
++        "hysteresisValidation": "Hysteresis must be between 0 °C and 20 °C.",
++        "controlledOutputs": "This curve controls FAN1 through FAN6, including the pump on FAN2. Every selected source remains required: loss of a source or a required fan tachometer selects the existing 100% fail-safe; telemetry-free fan channels follow the curve.",
++        "validation": "Use 2 to 20 points. Temperatures must increase, outputs must not decrease, output must remain between 30% and 100%, and the final point must be 100%.",
 +        "unavailable": "Unavailable",
 +        "toast": {
-+            "successSaveSettings": "Fan curve saved.",
-+            "errorLoadSettings": "The fan curve could not be loaded.",
-+            "errorSaveSettings": "The fan curve could not be saved."
++            "successSaveSettings": "Fan control settings saved.",
++            "errorLoadSettings": "The fan control settings could not be loaded.",
++            "errorSaveSettings": "The fan control settings could not be saved."
 +        }
 +    },
      "pageSerialOverLan": {
@@ -139,79 +156,186 @@ index 61c08c2..df6c55c 100644
      processors: ProcessorStore,
 diff --git a/src/store/modules/HardwareStatus/FanControlStore.js b/src/store/modules/HardwareStatus/FanControlStore.js
 new file mode 100644
-index 0000000..088d2ca
+index 0000000..e069684
 --- /dev/null
 +++ b/src/store/modules/HardwareStatus/FanControlStore.js
-@@ -0,0 +1,113 @@
+@@ -0,0 +1,234 @@
 +import api from '@/store/api';
 +import i18n from '@/i18n';
 +
 +const managerPath = '/redfish/v1/Managers/bmc';
 +const curveName = 'TR1_Fan_Curve';
-+const tr1SensorPath =
-+  '/redfish/v1/Chassis/ASRock_Rack_TRX40D8_2N2T/Sensors/temperature_TR1_TEMP';
++const sensorCollectionPath =
++  '/redfish/v1/Chassis/ASRock_Rack_TRX40D8_2N2T/Sensors';
++
++function canonicalSensorName(name) {
++  return name
++    .trim()
++    .replace(/^temperature_/, '')
++    .replaceAll(' ', '_');
++}
++
++function sensorNameFromUri(uri) {
++  const segment = decodeURIComponent(
++    uri.split('/').filter(Boolean).pop() || '',
++  );
++  return canonicalSensorName(segment);
++}
++
++function transformTemperatureSensor(sensor) {
++  const uri = sensor['@odata.id'] || '';
++  const id = sensorNameFromUri(uri);
++  const reading = sensor.Reading ?? sensor.ReadingCelsius;
++  return {
++    id,
++    name: sensor.Name || id,
++    uri,
++    reading: Number.isFinite(reading) ? reading : null,
++    health: sensor.Status?.Health || 'Unknown',
++  };
++}
++
++async function getTemperatureSensors() {
++  const { data: collection } = await api.get(sensorCollectionPath);
++  if (!Array.isArray(collection.Members)) {
++    throw new Error('Invalid sensor collection response');
++  }
++
++  const responses = await api.all(
++    collection.Members.map(async (member) => {
++      if (
++        Number.isFinite(member.Reading) ||
++        Number.isFinite(member.ReadingCelsius)
++      ) {
++        return member;
++      }
++      try {
++        const { data } = await api.get(member['@odata.id']);
++        return data;
++      } catch (error) {
++        return { ...member, unavailable: true };
++      }
++    }),
++  );
++
++  return responses
++    .filter((sensor) => {
++      const uri = sensor['@odata.id'] || '';
++      return (
++        sensor.ReadingType === 'Temperature' ||
++        Number.isFinite(sensor.ReadingCelsius) ||
++        uri.includes('/temperature_')
++      );
++    })
++    .map(transformTemperatureSensor)
++    .filter((sensor) => sensor.id)
++    .sort((left, right) => left.name.localeCompare(right.name));
++}
++
++function mergeConfiguredSources(sensors, inputs) {
++  const merged = sensors.map((sensor) => ({ ...sensor }));
++  inputs.forEach((input) => {
++    const id = canonicalSensorName(input);
++    if (!merged.some((sensor) => sensor.id === id)) {
++      merged.push({
++        id,
++        name: input,
++        uri: '',
++        reading: null,
++        health: 'Unknown',
++      });
++    }
++  });
++  return merged;
++}
 +
 +const FanControlStore = {
 +  namespaced: true,
 +  state: {
 +    readings: [],
 +    outputs: [],
++    inputs: [],
 +    positiveHysteresis: null,
 +    negativeHysteresis: null,
-+    tr1Temperature: null,
++    temperatureSensors: [],
 +  },
 +  getters: {
 +    readings: (state) => state.readings,
 +    outputs: (state) => state.outputs,
++    inputs: (state) => state.inputs,
 +    positiveHysteresis: (state) => state.positiveHysteresis,
 +    negativeHysteresis: (state) => state.negativeHysteresis,
-+    tr1Temperature: (state) => state.tr1Temperature,
++    temperatureSensors: (state) => state.temperatureSensors,
++    selectedSensors: (state) =>
++      state.inputs.map((input) =>
++        state.temperatureSensors.find((sensor) => sensor.id === input),
++      ),
++    allSourcesAvailable: (state, getters) =>
++      state.inputs.length > 0 &&
++      getters.selectedSensors.every(
++        (sensor) => sensor && Number.isFinite(sensor.reading),
++      ),
++    effectiveTemperature: (state, getters) => {
++      if (!getters.allSourcesAvailable) return null;
++      return Math.max(
++        ...getters.selectedSensors.map((sensor) => sensor.reading),
++      );
++    },
 +  },
 +  mutations: {
 +    setCurve(state, curve) {
 +      state.readings = curve.Reading;
 +      state.outputs = curve.Output;
++      state.inputs = curve.Inputs.map(canonicalSensorName);
 +      state.positiveHysteresis = curve.PositiveHysteresis;
 +      state.negativeHysteresis = curve.NegativeHysteresis;
 +    },
-+    setTr1Temperature(state, temperature) {
-+      state.tr1Temperature = temperature;
++    setTemperatureSensors(state, sensors) {
++      state.temperatureSensors = sensors;
 +    },
 +  },
 +  actions: {
 +    async getFanCurve({ commit }) {
 +      try {
-+        const [curveResponse, sensorResponse] = await api.all([
++        const [curveResponse, temperatureSensors] = await api.all([
 +          api.get(managerPath),
-+          api.get(tr1SensorPath),
++          getTemperatureSensors(),
 +        ]);
 +        const curve =
 +          curveResponse.data?.Oem?.OpenBmc?.Fan?.StepwiseControllers?.[
 +            curveName
 +          ];
 +        const steps = curve?.Steps;
-+        const temperature = sensorResponse.data?.Reading;
++        const inputs = curve?.Inputs;
 +
 +        if (
 +          !Array.isArray(steps) ||
-+          !steps.length ||
++          steps.length < 2 ||
++          steps.length > 20 ||
 +          !steps.every(
 +            (step) =>
 +              Number.isFinite(step.Target) && Number.isFinite(step.Output),
-+          )
++          ) ||
++          !Array.isArray(inputs) ||
++          !inputs.length ||
++          !inputs.every((input) => typeof input === 'string') ||
++          !Number.isFinite(curve.PositiveHysteresis) ||
++          !Number.isFinite(curve.NegativeHysteresis)
 +        ) {
 +          throw new Error('Invalid fan curve response');
 +        }
 +
++        const canonicalInputs = inputs.map(canonicalSensorName);
 +        commit('setCurve', {
 +          Reading: steps.map((step) => step.Target),
 +          Output: steps.map((step) => step.Output),
++          Inputs: canonicalInputs,
 +          PositiveHysteresis: curve.PositiveHysteresis,
 +          NegativeHysteresis: curve.NegativeHysteresis,
 +        });
 +        commit(
-+          'setTr1Temperature',
-+          Number.isFinite(temperature) ? temperature : null,
++          'setTemperatureSensors',
++          mergeConfiguredSources(temperatureSensors, canonicalInputs),
 +        );
 +      } catch (error) {
 +        console.log(error);
@@ -220,8 +344,12 @@ index 0000000..088d2ca
 +        );
 +      }
 +    },
-+    async saveFanCurve({ commit, dispatch, getters }, { readings, outputs }) {
++    async saveFanCurve(
++      { commit, dispatch, state },
++      { readings, outputs, inputs, positiveHysteresis, negativeHysteresis },
++    ) {
 +      try {
++        const canonicalInputs = inputs.map(canonicalSensorName);
 +        const steps = readings.map((target, index) => ({
 +          Target: target,
 +          Output: outputs[index],
@@ -231,7 +359,12 @@ index 0000000..088d2ca
 +            OpenBmc: {
 +              Fan: {
 +                StepwiseControllers: {
-+                  [curveName]: { Steps: steps },
++                  [curveName]: {
++                    Inputs: canonicalInputs,
++                    NegativeHysteresis: negativeHysteresis,
++                    PositiveHysteresis: positiveHysteresis,
++                    Steps: steps,
++                  },
 +                },
 +              },
 +            },
@@ -240,9 +373,14 @@ index 0000000..088d2ca
 +        commit('setCurve', {
 +          Reading: readings,
 +          Output: outputs,
-+          PositiveHysteresis: getters.positiveHysteresis,
-+          NegativeHysteresis: getters.negativeHysteresis,
++          Inputs: canonicalInputs,
++          PositiveHysteresis: positiveHysteresis,
++          NegativeHysteresis: negativeHysteresis,
 +        });
++        commit(
++          'setTemperatureSensors',
++          mergeConfiguredSources(state.temperatureSensors, canonicalInputs),
++        );
 +        return i18n.global.t('pageFanControl.toast.successSaveSettings');
 +      } catch (error) {
 +        console.log(error);
@@ -258,10 +396,10 @@ index 0000000..088d2ca
 +export default FanControlStore;
 diff --git a/src/views/HardwareStatus/FanControl/FanControl.vue b/src/views/HardwareStatus/FanControl/FanControl.vue
 new file mode 100644
-index 0000000..9471943
+index 0000000..985d867
 --- /dev/null
 +++ b/src/views/HardwareStatus/FanControl/FanControl.vue
-@@ -0,0 +1,462 @@
+@@ -0,0 +1,778 @@
 +<template>
 +  <b-container fluid="xl">
 +    <page-title :description="$t('pageFanControl.description')" />
@@ -290,10 +428,19 @@ index 0000000..9471943
 +
 +          <div
 +            class="curve-chart"
-+            role="img"
++            role="group"
 +            :aria-label="$t('pageFanControl.curveTitle')"
 +          >
-+            <svg viewBox="0 0 680 360" aria-hidden="true">
++            <svg
++              ref="curveChart"
++              viewBox="0 0 680 360"
++              @dblclick="addPointAtEvent"
++              @pointermove="dragPoint"
++              @pointerup="endDrag"
++              @pointercancel="endDrag"
++              @pointerleave="endDrag"
++            >
++              <title>{{ $t('pageFanControl.dragHint') }}</title>
 +              <g class="chart-grid">
 +                <line
 +                  v-for="tick in outputTicks"
@@ -349,36 +496,75 @@ index 0000000..9471943
 +                </text>
 +              </g>
 +
-+              <path class="curve-line" :d="stepPath" />
++              <path class="curve-line" :d="curvePath" />
 +
 +              <g v-if="currentTemperatureInRange">
 +                <line
 +                  class="current-temperature-line"
-+                  :x1="temperatureX(tr1Temperature)"
-+                  :x2="temperatureX(tr1Temperature)"
++                  :x1="temperatureX(effectiveTemperature)"
++                  :x2="temperatureX(effectiveTemperature)"
 +                  :y1="chart.top"
 +                  :y2="chart.height - chart.bottom"
 +                />
 +                <circle
 +                  class="current-target-point"
-+                  :cx="temperatureX(tr1Temperature)"
++                  :cx="temperatureX(effectiveTemperature)"
 +                  :cy="outputY(currentTarget)"
 +                  r="6"
 +                />
 +              </g>
++
++              <g v-if="curveNumbersAreFinite">
++                <circle
++                  v-for="(point, index) in points"
++                  :key="`point-${index}`"
++                  class="curve-point"
++                  :class="{ dragging: draggingIndex === index }"
++                  :cx="temperatureX(point.temperature)"
++                  :cy="outputY(point.output)"
++                  r="8"
++                  tabindex="0"
++                  role="slider"
++                  :aria-valuemin="minimumOutput"
++                  :aria-valuemax="maximumOutput"
++                  :aria-valuenow="point.output"
++                  :aria-label="pointAriaLabel(point, index)"
++                  @dblclick.stop
++                  @keydown="nudgePoint($event, index)"
++                  @pointerdown.stop="startDrag($event, index)"
++                />
++              </g>
 +            </svg>
 +          </div>
-+        </b-card>
-+      </b-col>
 +
-+      <b-col xl="4">
-+        <b-card class="mb-4">
++          <p class="text-muted mb-3">
++            {{ $t('pageFanControl.dragHint') }}
++          </p>
++
++          <b-button
++            variant="outline-primary"
++            :disabled="points.length >= maximumPoints || !curveIsValid"
++            @click="addPoint"
++          >
++            {{ $t('pageFanControl.addPoint') }}
++          </b-button>
++        </b-card>
++
++        <b-card class="mb-4" :title="$t('pageFanControl.pointEditorTitle')">
++          <b-card-text>
++            {{ $t('pageFanControl.pointEditorDescription') }}
++          </b-card-text>
 +          <b-table-simple responsive>
 +            <b-thead>
 +              <b-tr>
 +                <b-th>{{ $t('pageFanControl.pointColumn') }}</b-th>
 +                <b-th>{{ $t('pageFanControl.temperature') }}</b-th>
 +                <b-th>{{ $t('pageFanControl.output') }}</b-th>
++                <b-th>
++                  <span class="visually-hidden">
++                    {{ $t('pageFanControl.actions') }}
++                  </span>
++                </b-th>
 +              </b-tr>
 +            </b-thead>
 +            <b-tbody>
@@ -388,8 +574,8 @@ index 0000000..9471943
 +                  <b-form-input
 +                    v-model.number="point.temperature"
 +                    type="number"
-+                    min="-40"
-+                    max="150"
++                    :min="minimumTemperature"
++                    :max="maximumTemperature"
 +                    step="0.5"
 +                    :aria-label="
 +                      $t('pageFanControl.temperature') + ' ' + (index + 1)
@@ -401,14 +587,28 @@ index 0000000..9471943
 +                  <b-form-input
 +                    v-model.number="point.output"
 +                    type="number"
-+                    min="30"
-+                    max="100"
++                    :min="minimumOutput"
++                    :max="maximumOutput"
 +                    step="1"
++                    :disabled="index === points.length - 1"
 +                    :aria-label="
 +                      $t('pageFanControl.output') + ' ' + (index + 1)
 +                    "
 +                    :state="inputState"
 +                  />
++                </b-td>
++                <b-td>
++                  <b-button
++                    size="sm"
++                    variant="outline-danger"
++                    :disabled="points.length <= minimumPoints"
++                    :aria-label="
++                      $t('pageFanControl.removePoint') + ' ' + (index + 1)
++                    "
++                    @click="removePoint(index)"
++                  >
++                    {{ $t('pageFanControl.removePoint') }}
++                  </b-button>
 +                </b-td>
 +              </b-tr>
 +            </b-tbody>
@@ -417,30 +617,105 @@ index 0000000..9471943
 +          <b-alert :show="points.length > 0 && !curveIsValid" variant="danger">
 +            {{ $t('pageFanControl.validation') }}
 +          </b-alert>
-+
-+          <dl class="hysteresis">
-+            <div>
-+              <dt>{{ $t('pageFanControl.positiveHysteresis') }}</dt>
-+              <dd>{{ positiveHysteresis }} °C</dd>
-+            </div>
-+            <div>
-+              <dt>{{ $t('pageFanControl.negativeHysteresis') }}</dt>
-+              <dd>{{ negativeHysteresis }} °C</dd>
-+            </div>
-+          </dl>
-+
-+          <b-button
-+            variant="primary"
-+            class="me-2"
-+            :disabled="!curveIsValid || saving"
-+            @click="saveCurve"
-+          >
-+            {{ $t('global.action.saveSettings') }}
-+          </b-button>
-+          <b-button variant="secondary" :disabled="saving" @click="loadCurve">
-+            {{ $t('global.action.reset') }}
-+          </b-button>
 +        </b-card>
++      </b-col>
++
++      <b-col xl="4">
++        <b-card class="mb-4" :title="$t('pageFanControl.sourceTitle')">
++          <b-card-text>
++            {{ $t('pageFanControl.sourceDescription') }}
++          </b-card-text>
++
++          <b-form-checkbox-group v-model="selectedSources" stacked>
++            <b-form-checkbox
++              v-for="source in temperatureSensors"
++              :key="source.id"
++              :value="source.id"
++              class="source-option"
++            >
++              <span>{{ source.name }}</span>
++              <small v-if="source.name !== source.id" class="text-muted">
++                {{ source.id }}
++              </small>
++              <strong>{{ formattedSourceReading(source) }}</strong>
++            </b-form-checkbox>
++          </b-form-checkbox-group>
++
++          <b-alert
++            :show="temperatureSensors.length === 0"
++            variant="warning"
++            class="mt-3"
++          >
++            {{ $t('pageFanControl.noSources') }}
++          </b-alert>
++          <b-alert :show="!sourcesAreValid" variant="danger" class="mt-3">
++            {{ $t('pageFanControl.sourceValidation') }}
++          </b-alert>
++          <b-alert
++            :show="selectedSources.length > 0 && !allSelectedSourcesAvailable"
++            variant="danger"
++            class="mt-3"
++          >
++            {{ $t('pageFanControl.sourceUnavailable') }}
++          </b-alert>
++        </b-card>
++
++        <b-card class="mb-4" :title="$t('pageFanControl.hysteresisTitle')">
++          <b-card-text>
++            {{ $t('pageFanControl.hysteresisDescription') }}
++          </b-card-text>
++
++          <b-form-group
++            :label="$t('pageFanControl.positiveHysteresis')"
++            label-for="positive-hysteresis"
++          >
++            <b-input-group append="°C">
++              <b-form-input
++                id="positive-hysteresis"
++                v-model.number="positiveHysteresis"
++                type="number"
++                min="0"
++                max="20"
++                step="0.1"
++                :state="hysteresisInputState"
++              />
++            </b-input-group>
++          </b-form-group>
++
++          <b-form-group
++            class="mt-3"
++            :label="$t('pageFanControl.negativeHysteresis')"
++            label-for="negative-hysteresis"
++          >
++            <b-input-group append="°C">
++              <b-form-input
++                id="negative-hysteresis"
++                v-model.number="negativeHysteresis"
++                type="number"
++                min="0"
++                max="20"
++                step="0.1"
++                :state="hysteresisInputState"
++              />
++            </b-input-group>
++          </b-form-group>
++
++          <b-alert :show="!hysteresisIsValid" variant="danger" class="mt-3">
++            {{ $t('pageFanControl.hysteresisValidation') }}
++          </b-alert>
++        </b-card>
++
++        <b-button
++          variant="primary"
++          class="me-2"
++          :disabled="!configurationIsValid || saving"
++          @click="saveCurve"
++        >
++          {{ $t('global.action.saveSettings') }}
++        </b-button>
++        <b-button variant="secondary" :disabled="saving" @click="loadCurve">
++          {{ $t('global.action.reset') }}
++        </b-button>
 +      </b-col>
 +    </b-row>
 +  </b-container>
@@ -450,8 +725,19 @@ index 0000000..9471943
 +import PageTitle from '@/components/Global/PageTitle';
 +import LoadingBarMixin from '@/components/Mixins/LoadingBarMixin';
 +import BVToastMixin from '@/components/Mixins/BVToastMixin';
-+
-+const pointCount = 7;
++import {
++  MAXIMUM_OUTPUT,
++  MAXIMUM_POINTS,
++  MAXIMUM_TEMPERATURE,
++  MINIMUM_OUTPUT,
++  MINIMUM_POINTS,
++  MINIMUM_TEMPERATURE,
++  constrainCurvePoint,
++  curveIsValid,
++  insertCurvePoint,
++  insertPointInWidestGap,
++  interpolateCurve,
++} from './fanCurve';
 +
 +export default {
 +  name: 'FanControl',
@@ -471,7 +757,18 @@ index 0000000..9471943
 +        top: 20,
 +        bottom: 54,
 +      },
++      minimumPoints: MINIMUM_POINTS,
++      maximumPoints: MAXIMUM_POINTS,
++      minimumTemperature: MINIMUM_TEMPERATURE,
++      maximumTemperature: MAXIMUM_TEMPERATURE,
++      minimumOutput: MINIMUM_OUTPUT,
++      maximumOutput: MAXIMUM_OUTPUT,
 +      points: [],
++      selectedSources: [],
++      positiveHysteresis: null,
++      negativeHysteresis: null,
++      draggingIndex: null,
++      dragDomain: null,
 +      saving: false,
 +    };
 +  },
@@ -482,14 +779,35 @@ index 0000000..9471943
 +    outputs() {
 +      return this.$store.getters['fanControl/outputs'];
 +    },
-+    positiveHysteresis() {
++    inputs() {
++      return this.$store.getters['fanControl/inputs'];
++    },
++    storedPositiveHysteresis() {
 +      return this.$store.getters['fanControl/positiveHysteresis'];
 +    },
-+    negativeHysteresis() {
++    storedNegativeHysteresis() {
 +      return this.$store.getters['fanControl/negativeHysteresis'];
 +    },
-+    tr1Temperature() {
-+      return this.$store.getters['fanControl/tr1Temperature'];
++    temperatureSensors() {
++      return this.$store.getters['fanControl/temperatureSensors'];
++    },
++    selectedSensorObjects() {
++      return this.selectedSources.map((input) =>
++        this.temperatureSensors.find((sensor) => sensor.id === input),
++      );
++    },
++    allSelectedSourcesAvailable() {
++      return this.selectedSensorObjects.every(
++        (sensor) => sensor && Number.isFinite(sensor.reading),
++      );
++    },
++    effectiveTemperature() {
++      if (!this.selectedSources.length || !this.allSelectedSourcesAvailable) {
++        return null;
++      }
++      return Math.max(
++        ...this.selectedSensorObjects.map((sensor) => sensor.reading),
++      );
 +    },
 +    plotWidth() {
 +      return this.chart.width - this.chart.left - this.chart.right;
@@ -497,41 +815,65 @@ index 0000000..9471943
 +    plotHeight() {
 +      return this.chart.height - this.chart.top - this.chart.bottom;
 +    },
-+    temperatureMinimum() {
++    temperatureMinimumForChart() {
++      if (this.dragDomain) return this.dragDomain.minimum;
 +      if (!this.points.length) return 0;
-+      return Math.floor((this.points[0].temperature - 5) / 5) * 5;
-+    },
-+    temperatureMaximum() {
-+      if (!this.points.length) return 60;
-+      const last = this.points[this.points.length - 1].temperature;
++      const values = [this.points[0].temperature];
++      if (Number.isFinite(this.effectiveTemperature)) {
++        values.push(this.effectiveTemperature);
++      }
 +      return Math.max(
-+        Math.ceil((last + 5) / 5) * 5,
-+        this.temperatureMinimum + 5,
++        MINIMUM_TEMPERATURE,
++        Math.floor((Math.min(...values) - 5) / 5) * 5,
++      );
++    },
++    temperatureMaximumForChart() {
++      if (this.dragDomain) return this.dragDomain.maximum;
++      if (!this.points.length) return 60;
++      const values = [this.points[this.points.length - 1].temperature];
++      if (Number.isFinite(this.effectiveTemperature)) {
++        values.push(this.effectiveTemperature);
++      }
++      return Math.min(
++        MAXIMUM_TEMPERATURE,
++        Math.max(
++          Math.ceil((Math.max(...values) + 5) / 5) * 5,
++          this.temperatureMinimumForChart + 5,
++        ),
 +      );
 +    },
 +    temperatureTicks() {
-+      const range = this.temperatureMaximum - this.temperatureMinimum;
-+      return Array.from(
-+        { length: 6 },
-+        (_, index) => this.temperatureMinimum + (range * index) / 5,
++      const range =
++        this.temperatureMaximumForChart - this.temperatureMinimumForChart;
++      return Array.from({ length: 6 }, (_, index) =>
++        Number(
++          (this.temperatureMinimumForChart + (range * index) / 5).toFixed(1),
++        ),
 +      );
 +    },
 +    outputTicks() {
 +      return [0, 20, 40, 60, 80, 100];
 +    },
-+    stepPath() {
++    curvePath() {
 +      if (!this.curveIsValid) return '';
++      const first = this.points[0];
++      const last = this.points[this.points.length - 1];
 +      const path = [
-+        `M ${this.temperatureX(this.temperatureMinimum)} ${this.outputY(
-+          this.points[0].output,
++        `M ${this.temperatureX(this.temperatureMinimumForChart)} ${this.outputY(
++          first.output,
 +        )}`,
++        `L ${this.temperatureX(first.temperature)} ${this.outputY(first.output)}`,
 +      ];
-+
 +      this.points.slice(1).forEach((point) => {
-+        path.push(`H ${this.temperatureX(point.temperature)}`);
-+        path.push(`V ${this.outputY(point.output)}`);
++        path.push(
++          `L ${this.temperatureX(point.temperature)} ${this.outputY(point.output)}`,
++        );
 +      });
-+      path.push(`H ${this.temperatureX(this.temperatureMaximum)}`);
++      path.push(
++        `L ${this.temperatureX(this.temperatureMaximumForChart)} ${this.outputY(
++          last.output,
++        )}`,
++      );
 +      return path.join(' ');
 +    },
 +    curveNumbersAreFinite() {
@@ -541,60 +883,51 @@ index 0000000..9471943
 +      );
 +    },
 +    curveIsValid() {
-+      if (this.points.length !== pointCount || !this.curveNumbersAreFinite) {
-+        return false;
-+      }
-+
-+      return this.points.every((point, index) => {
-+        const previous = this.points[index - 1];
-+        return (
-+          point.temperature >= -40 &&
-+          point.temperature <= 150 &&
-+          point.output >= 30 &&
-+          point.output <= 100 &&
-+          (!previous ||
-+            (point.temperature > previous.temperature &&
-+              point.output >= previous.output)) &&
-+          (index !== this.points.length - 1 || point.output === 100)
-+        );
-+      });
++      return curveIsValid(this.points);
++    },
++    sourcesAreValid() {
++      return this.selectedSources.length > 0;
++    },
++    hysteresisIsValid() {
++      return (
++        Number.isFinite(this.positiveHysteresis) &&
++        this.positiveHysteresis >= 0 &&
++        this.positiveHysteresis <= 20 &&
++        Number.isFinite(this.negativeHysteresis) &&
++        this.negativeHysteresis >= 0 &&
++        this.negativeHysteresis <= 20
++      );
++    },
++    configurationIsValid() {
++      return (
++        this.curveIsValid && this.sourcesAreValid && this.hysteresisIsValid
++      );
 +    },
 +    inputState() {
 +      return this.curveIsValid ? null : false;
 +    },
++    hysteresisInputState() {
++      return this.hysteresisIsValid ? null : false;
++    },
 +    currentTarget() {
-+      if (
-+        !Number.isFinite(this.tr1Temperature) ||
-+        !this.points.length ||
-+        !this.curveNumbersAreFinite
-+      ) {
-+        return null;
-+      }
-+
-+      let target = this.points[0].output;
-+      this.points.slice(1).forEach((point) => {
-+        if (this.tr1Temperature >= point.temperature) {
-+          target = point.output;
-+        }
-+      });
-+      return target;
++      return interpolateCurve(this.points, this.effectiveTemperature);
 +    },
 +    currentTemperatureInRange() {
 +      return (
-+        Number.isFinite(this.tr1Temperature) &&
++        Number.isFinite(this.effectiveTemperature) &&
 +        Number.isFinite(this.currentTarget) &&
-+        this.tr1Temperature >= this.temperatureMinimum &&
-+        this.tr1Temperature <= this.temperatureMaximum
++        this.effectiveTemperature >= this.temperatureMinimumForChart &&
++        this.effectiveTemperature <= this.temperatureMaximumForChart
 +      );
 +    },
 +    formattedTemperature() {
-+      return Number.isFinite(this.tr1Temperature)
-+        ? `${this.tr1Temperature.toFixed(1)} °C`
++      return Number.isFinite(this.effectiveTemperature)
++        ? `${this.effectiveTemperature.toFixed(1)} °C`
 +        : this.$t('pageFanControl.unavailable');
 +    },
 +    formattedTarget() {
 +      return Number.isFinite(this.currentTarget)
-+        ? `${this.currentTarget}%`
++        ? `${this.currentTarget.toFixed(1)}%`
 +        : this.$t('pageFanControl.unavailable');
 +    },
 +  },
@@ -602,27 +935,121 @@ index 0000000..9471943
 +    this.loadCurve();
 +  },
 +  methods: {
-+    setPointsFromStore() {
++    setSettingsFromStore() {
 +      this.points = this.readings.map((temperature, index) => ({
 +        temperature,
 +        output: this.outputs[index],
 +      }));
++      this.selectedSources = [...this.inputs];
++      this.positiveHysteresis = this.storedPositiveHysteresis;
++      this.negativeHysteresis = this.storedNegativeHysteresis;
 +    },
 +    temperatureX(value) {
-+      const range = this.temperatureMaximum - this.temperatureMinimum;
++      const range =
++        this.temperatureMaximumForChart - this.temperatureMinimumForChart;
 +      return (
 +        this.chart.left +
-+        ((value - this.temperatureMinimum) / range) * this.plotWidth
++        ((value - this.temperatureMinimumForChart) / range) * this.plotWidth
 +      );
 +    },
 +    outputY(value) {
 +      return this.chart.top + ((100 - value) / 100) * this.plotHeight;
 +    },
++    chartValuesFromEvent(event) {
++      const bounds = this.$refs.curveChart.getBoundingClientRect();
++      const chartX =
++        ((event.clientX - bounds.left) / bounds.width) * this.chart.width;
++      const chartY =
++        ((event.clientY - bounds.top) / bounds.height) * this.chart.height;
++      return {
++        temperature:
++          this.temperatureMinimumForChart +
++          ((chartX - this.chart.left) / this.plotWidth) *
++            (this.temperatureMaximumForChart - this.temperatureMinimumForChart),
++        output: 100 - ((chartY - this.chart.top) / this.plotHeight) * 100,
++      };
++    },
++    startDrag(event, index) {
++      if (!this.curveIsValid) return;
++      event.preventDefault();
++      this.dragDomain = {
++        minimum: this.temperatureMinimumForChart,
++        maximum: this.temperatureMaximumForChart,
++      };
++      this.draggingIndex = index;
++      this.$refs.curveChart.setPointerCapture?.(event.pointerId);
++      this.dragPoint(event);
++    },
++    dragPoint(event) {
++      if (this.draggingIndex === null) return;
++      event.preventDefault();
++      const values = this.chartValuesFromEvent(event);
++      this.points[this.draggingIndex] = constrainCurvePoint(
++        this.points,
++        this.draggingIndex,
++        values.temperature,
++        values.output,
++      );
++    },
++    endDrag(event) {
++      if (this.draggingIndex === null) return;
++      if (this.$refs.curveChart.hasPointerCapture?.(event.pointerId)) {
++        this.$refs.curveChart.releasePointerCapture(event.pointerId);
++      }
++      this.draggingIndex = null;
++      this.dragDomain = null;
++    },
++    nudgePoint(event, index) {
++      const multiplier = event.shiftKey ? 5 : 1;
++      let temperature = this.points[index].temperature;
++      let output = this.points[index].output;
++      if (event.key === 'ArrowLeft') temperature -= 0.5 * multiplier;
++      else if (event.key === 'ArrowRight') temperature += 0.5 * multiplier;
++      else if (event.key === 'ArrowUp') output += multiplier;
++      else if (event.key === 'ArrowDown') output -= multiplier;
++      else return;
++
++      event.preventDefault();
++      this.points[index] = constrainCurvePoint(
++        this.points,
++        index,
++        temperature,
++        output,
++      );
++    },
++    addPoint() {
++      this.points = insertPointInWidestGap(this.points);
++    },
++    addPointAtEvent(event) {
++      if (!this.curveIsValid || this.points.length >= MAXIMUM_POINTS) return;
++      const values = this.chartValuesFromEvent(event);
++      this.points = insertCurvePoint(
++        this.points,
++        values.temperature,
++        values.output,
++      );
++    },
++    removePoint(index) {
++      if (this.points.length <= MINIMUM_POINTS) return;
++      const points = this.points.filter(
++        (point, pointIndex) => pointIndex !== index,
++      );
++      points[points.length - 1].output = MAXIMUM_OUTPUT;
++      this.points = points;
++    },
++    pointAriaLabel(point, index) {
++      return `${this.$t('pageFanControl.pointColumn')} ${index + 1}: ${point.temperature} °C, ${point.output}%`;
++    },
++    formattedSourceReading(source) {
++      return Number.isFinite(source.reading)
++        ? `${source.reading.toFixed(1)} °C`
++        : this.$t('pageFanControl.unavailable');
++    },
 +    async loadCurve() {
 +      this.startLoader();
 +      try {
 +        await this.$store.dispatch('fanControl/getFanCurve');
-+        this.setPointsFromStore();
++        this.setSettingsFromStore();
 +      } catch ({ message }) {
 +        this.errorToast(message);
 +      } finally {
@@ -630,7 +1057,7 @@ index 0000000..9471943
 +      }
 +    },
 +    async saveCurve() {
-+      if (!this.curveIsValid) return;
++      if (!this.configurationIsValid) return;
 +
 +      this.saving = true;
 +      this.startLoader();
@@ -638,11 +1065,14 @@ index 0000000..9471943
 +        const message = await this.$store.dispatch('fanControl/saveFanCurve', {
 +          readings: this.points.map((point) => point.temperature),
 +          outputs: this.points.map((point) => point.output),
++          inputs: this.selectedSources,
++          positiveHysteresis: this.positiveHysteresis,
++          negativeHysteresis: this.negativeHysteresis,
 +        });
 +        this.successToast(message);
 +      } catch ({ message }) {
 +        this.errorToast(message);
-+        this.setPointsFromStore();
++        this.setSettingsFromStore();
 +      } finally {
 +        this.saving = false;
 +        this.endLoader();
@@ -653,8 +1083,7 @@ index 0000000..9471943
 +</script>
 +
 +<style lang="scss" scoped>
-+.curve-status,
-+.hysteresis {
++.curve-status {
 +  display: flex;
 +  flex-wrap: wrap;
 +  gap: 1rem 2rem;
@@ -683,6 +1112,7 @@ index 0000000..9471943
 +  svg {
 +    display: block;
 +    min-width: 36rem;
++    touch-action: none;
 +    width: 100%;
 +  }
 +}
@@ -700,8 +1130,28 @@ index 0000000..9471943
 +.curve-line {
 +  fill: none;
 +  stroke: $primary;
++  stroke-linecap: round;
 +  stroke-linejoin: round;
 +  stroke-width: 4;
++}
++
++.curve-point {
++  cursor: grab;
++  fill: $white;
++  stroke: $primary;
++  stroke-width: 4;
++
++  &:focus,
++  &:hover,
++  &.dragging {
++    fill: $primary;
++    outline: none;
++    stroke: $white;
++  }
++
++  &.dragging {
++    cursor: grabbing;
++  }
 +}
 +
 +.current-temperature-line {
@@ -716,14 +1166,149 @@ index 0000000..9471943
 +  stroke-width: 3;
 +}
 +
-+.hysteresis {
-+  margin-top: 1rem;
++.source-option {
++  border-bottom: 1px solid $gray-300;
++  padding-bottom: 0.75rem;
++  padding-top: 0.75rem;
 +
-+  dd {
-+    font-size: 1rem;
++  small,
++  strong {
++    display: block;
++    margin-left: 0.25rem;
 +  }
 +}
 +</style>
+diff --git a/src/views/HardwareStatus/FanControl/fanCurve.js b/src/views/HardwareStatus/FanControl/fanCurve.js
+new file mode 100644
+index 0000000..32d296c
+--- /dev/null
++++ b/src/views/HardwareStatus/FanControl/fanCurve.js
+@@ -0,0 +1,125 @@
++export const MINIMUM_POINTS = 2;
++export const MAXIMUM_POINTS = 20;
++export const MINIMUM_TEMPERATURE = -40;
++export const MAXIMUM_TEMPERATURE = 150;
++export const MINIMUM_OUTPUT = 30;
++export const MAXIMUM_OUTPUT = 100;
++
++const minimumTemperatureGap = 0.1;
++
++function clamp(value, minimum, maximum) {
++  return Math.min(Math.max(value, minimum), maximum);
++}
++
++function round(value, digits) {
++  const factor = 10 ** digits;
++  return Math.round(value * factor) / factor;
++}
++
++export function curveIsValid(points) {
++  if (points.length < MINIMUM_POINTS || points.length > MAXIMUM_POINTS) {
++    return false;
++  }
++
++  return points.every((point, index) => {
++    const previous = points[index - 1];
++    return (
++      Number.isFinite(point.temperature) &&
++      Number.isFinite(point.output) &&
++      point.temperature >= MINIMUM_TEMPERATURE &&
++      point.temperature <= MAXIMUM_TEMPERATURE &&
++      point.output >= MINIMUM_OUTPUT &&
++      point.output <= MAXIMUM_OUTPUT &&
++      (!previous ||
++        (point.temperature > previous.temperature &&
++          point.output >= previous.output)) &&
++      (index !== points.length - 1 || point.output === MAXIMUM_OUTPUT)
++    );
++  });
++}
++
++export function interpolateCurve(points, temperature) {
++  if (!curveIsValid(points) || !Number.isFinite(temperature)) return null;
++  if (temperature <= points[0].temperature) return points[0].output;
++
++  for (let index = 1; index < points.length; index += 1) {
++    const previous = points[index - 1];
++    const current = points[index];
++    if (temperature <= current.temperature) {
++      const fraction =
++        (temperature - previous.temperature) /
++        (current.temperature - previous.temperature);
++      return previous.output + fraction * (current.output - previous.output);
++    }
++  }
++
++  return points[points.length - 1].output;
++}
++
++export function constrainCurvePoint(points, index, temperature, output) {
++  const previous = points[index - 1];
++  const next = points[index + 1];
++  const minimumTemperature = previous
++    ? previous.temperature + minimumTemperatureGap
++    : MINIMUM_TEMPERATURE;
++  const maximumTemperature = next
++    ? next.temperature - minimumTemperatureGap
++    : MAXIMUM_TEMPERATURE;
++  const minimumOutput = previous ? previous.output : MINIMUM_OUTPUT;
++  const maximumOutput = next ? next.output : MAXIMUM_OUTPUT;
++
++  return {
++    temperature: round(
++      clamp(temperature, minimumTemperature, maximumTemperature),
++      1,
++    ),
++    output:
++      index === points.length - 1
++        ? MAXIMUM_OUTPUT
++        : round(clamp(output, minimumOutput, maximumOutput), 1),
++  };
++}
++
++export function insertCurvePoint(points, temperature, output) {
++  if (points.length >= MAXIMUM_POINTS) return points;
++
++  const insertionIndex = points.findIndex(
++    (point) => point.temperature > temperature,
++  );
++  const index = insertionIndex === -1 ? points.length : insertionIndex;
++  const nextPoints = points.map((point) => ({ ...point }));
++  nextPoints.splice(index, 0, { temperature, output });
++  nextPoints[index] = constrainCurvePoint(
++    nextPoints,
++    index,
++    temperature,
++    output,
++  );
++
++  if (!curveIsValid(nextPoints)) return points;
++  return nextPoints;
++}
++
++export function insertPointInWidestGap(points) {
++  if (!curveIsValid(points) || points.length >= MAXIMUM_POINTS) return points;
++
++  let leftIndex = 0;
++  let widestGap = points[1].temperature - points[0].temperature;
++  for (let index = 1; index < points.length - 1; index += 1) {
++    const gap = points[index + 1].temperature - points[index].temperature;
++    if (gap > widestGap) {
++      widestGap = gap;
++      leftIndex = index;
++    }
++  }
++
++  const temperature = round(
++    (points[leftIndex].temperature + points[leftIndex + 1].temperature) / 2,
++    1,
++  );
++  return insertCurvePoint(
++    points,
++    temperature,
++    interpolateCurve(points, temperature),
++  );
++}
 diff --git a/src/views/HardwareStatus/FanControl/index.js b/src/views/HardwareStatus/FanControl/index.js
 new file mode 100644
 index 0000000..8e0483a
@@ -790,10 +1375,10 @@ index 595dfeb..37372df 100644
                  class="nav-link"
 diff --git a/tests/unit/views/HardwareStatus/FanControl/FanControlStore.spec.js b/tests/unit/views/HardwareStatus/FanControl/FanControlStore.spec.js
 new file mode 100644
-index 0000000..d5017a4
+index 0000000..7d20c09
 --- /dev/null
 +++ b/tests/unit/views/HardwareStatus/FanControl/FanControlStore.spec.js
-@@ -0,0 +1,117 @@
+@@ -0,0 +1,188 @@
 +import { createStore } from 'vuex';
 +import { beforeEach, describe, expect, it, vi } from 'vitest';
 +
@@ -810,10 +1395,36 @@ index 0000000..d5017a4
 +
 +const managerPath = '/redfish/v1/Managers/bmc';
 +const curveName = 'TR1_Fan_Curve';
-+const tr1SensorPath =
-+  '/redfish/v1/Chassis/ASRock_Rack_TRX40D8_2N2T/Sensors/temperature_TR1_TEMP';
++const sensorCollectionPath =
++  '/redfish/v1/Chassis/ASRock_Rack_TRX40D8_2N2T/Sensors';
++const tr1SensorPath = `${sensorCollectionPath}/temperature_TR1_TEMP`;
++const cpuSensorPath = `${sensorCollectionPath}/temperature_CPU_Temp`;
 +const readings = [20, 25, 30, 35, 40, 45, 50];
 +const outputs = [50, 55, 60, 70, 80, 90, 100];
++
++function buildManagerResponse(inputs = ['TR1_TEMP', 'CPU Temp']) {
++  return {
++    data: {
++      Oem: {
++        OpenBmc: {
++          Fan: {
++            StepwiseControllers: {
++              [curveName]: {
++                Inputs: inputs,
++                Steps: readings.map((Target, index) => ({
++                  Target,
++                  Output: outputs[index],
++                })),
++                PositiveHysteresis: 0.5,
++                NegativeHysteresis: 0.5,
++              },
++            },
++          },
++        },
++      },
++    },
++  };
++}
 +
 +function buildStore() {
 +  return createStore({
@@ -831,50 +1442,70 @@ index 0000000..d5017a4
 +    store = buildStore();
 +    api.get.mockImplementation((path) => {
 +      if (path === managerPath) {
++        return Promise.resolve(buildManagerResponse());
++      }
++      if (path === sensorCollectionPath) {
 +        return Promise.resolve({
 +          data: {
-+            Oem: {
-+              OpenBmc: {
-+                Fan: {
-+                  StepwiseControllers: {
-+                    [curveName]: {
-+                      Steps: readings.map((Target, index) => ({
-+                        Target,
-+                        Output: outputs[index],
-+                      })),
-+                      PositiveHysteresis: 0.5,
-+                      NegativeHysteresis: 0.5,
-+                    },
-+                  },
-+                },
-+              },
-+            },
++            Members: [
++              { '@odata.id': tr1SensorPath },
++              { '@odata.id': cpuSensorPath },
++            ],
 +          },
 +        });
 +      }
 +      if (path === tr1SensorPath) {
-+        return Promise.resolve({ data: { Reading: 32 } });
++        return Promise.resolve({
++          data: {
++            '@odata.id': tr1SensorPath,
++            Name: 'TR1 water temperature',
++            Reading: 32,
++            ReadingType: 'Temperature',
++            Status: { Health: 'OK' },
++          },
++        });
++      }
++      if (path === cpuSensorPath) {
++        return Promise.resolve({
++          data: {
++            '@odata.id': cpuSensorPath,
++            Name: 'CPU temperature',
++            Reading: 48,
++            ReadingType: 'Temperature',
++            Status: { Health: 'OK' },
++          },
++        });
 +      }
 +      return Promise.reject(new Error('Unexpected path'));
 +    });
 +    api.patch.mockResolvedValue({ data: { status: 'ok' } });
 +  });
 +
-+  it('loads the editable curve and current TR1 temperature', async () => {
++  it('loads a variable curve, source choices, and their effective temperature', async () => {
 +    await store.dispatch('fanControl/getFanCurve');
 +
 +    expect(store.getters['fanControl/readings']).toEqual(readings);
 +    expect(store.getters['fanControl/outputs']).toEqual(outputs);
-+    expect(store.getters['fanControl/tr1Temperature']).toBe(32);
-+    expect(api.get).toHaveBeenCalledWith(managerPath);
-+    expect(api.get).toHaveBeenCalledWith(tr1SensorPath);
++    expect(store.getters['fanControl/inputs']).toEqual([
++      'TR1_TEMP',
++      'CPU_Temp',
++    ]);
++    expect(store.getters['fanControl/temperatureSensors']).toEqual([
++      expect.objectContaining({ id: 'CPU_Temp', reading: 48 }),
++      expect.objectContaining({ id: 'TR1_TEMP', reading: 32 }),
++    ]);
++    expect(store.getters['fanControl/effectiveTemperature']).toBe(48);
++    expect(store.getters['fanControl/allSourcesAvailable']).toBe(true);
 +  });
 +
-+  it('persists the complete curve through the Redfish manager API', async () => {
++  it('persists sources, hysteresis, and the complete curve', async () => {
 +    await store.dispatch('fanControl/getFanCurve');
 +    await store.dispatch('fanControl/saveFanCurve', {
 +      readings,
 +      outputs,
++      inputs: ['TR1_TEMP', 'CPU_Temp'],
++      positiveHysteresis: 0,
++      negativeHysteresis: 0.2,
 +    });
 +
 +    expect(api.patch).toHaveBeenCalledWith(managerPath, {
@@ -883,6 +1514,9 @@ index 0000000..d5017a4
 +          Fan: {
 +            StepwiseControllers: {
 +              [curveName]: {
++                Inputs: ['TR1_TEMP', 'CPU_Temp'],
++                NegativeHysteresis: 0.2,
++                PositiveHysteresis: 0,
 +                Steps: readings.map((Target, index) => ({
 +                  Target,
 +                  Output: outputs[index],
@@ -895,21 +1529,109 @@ index 0000000..d5017a4
 +    });
 +  });
 +
++  it('retains a configured source that is currently unavailable', async () => {
++    api.get.mockImplementation((path) => {
++      if (path === managerPath) {
++        return Promise.resolve(buildManagerResponse(['Missing Temp']));
++      }
++      if (path === sensorCollectionPath) {
++        return Promise.resolve({ data: { Members: [] } });
++      }
++      return Promise.reject(new Error('Unexpected path'));
++    });
++
++    await store.dispatch('fanControl/getFanCurve');
++
++    expect(store.getters['fanControl/temperatureSensors']).toEqual([
++      expect.objectContaining({ id: 'Missing_Temp', reading: null }),
++    ]);
++    expect(store.getters['fanControl/allSourcesAvailable']).toBe(false);
++    expect(store.getters['fanControl/effectiveTemperature']).toBeNull();
++  });
++
 +  it('rejects malformed curve responses', async () => {
-+    api.get.mockImplementation((path) =>
-+      Promise.resolve({
-+        data: {
-+          ...(path === managerPath
-+            ? { Oem: { OpenBmc: { Fan: { StepwiseControllers: {} } } } }
-+            : { Reading: 32 }),
-+        },
-+      }),
-+    );
++    api.get.mockImplementation((path) => {
++      if (path === managerPath) {
++        return Promise.resolve({
++          data: { Oem: { OpenBmc: { Fan: { StepwiseControllers: {} } } } },
++        });
++      }
++      if (path === sensorCollectionPath) {
++        return Promise.resolve({ data: { Members: [] } });
++      }
++      return Promise.reject(new Error('Unexpected path'));
++    });
 +
 +    await expect(store.dispatch('fanControl/getFanCurve')).rejects.toThrow(
-+      'The fan curve could not be loaded.',
++      'The fan control settings could not be loaded.',
 +    );
 +  });
 +});
+diff --git a/tests/unit/views/HardwareStatus/FanControl/FanCurve.spec.js b/tests/unit/views/HardwareStatus/FanControl/FanCurve.spec.js
+new file mode 100644
+index 0000000..d9b3d28
+--- /dev/null
++++ b/tests/unit/views/HardwareStatus/FanControl/FanCurve.spec.js
+@@ -0,0 +1,60 @@
++import { describe, expect, it } from 'vitest';
++
++import {
++  constrainCurvePoint,
++  curveIsValid,
++  insertCurvePoint,
++  insertPointInWidestGap,
++  interpolateCurve,
++} from '@/views/HardwareStatus/FanControl/fanCurve';
++
++const points = [
++  { temperature: 20, output: 40 },
++  { temperature: 30, output: 60 },
++  { temperature: 50, output: 100 },
++];
++
++describe('fan curve helpers', () => {
++  it('interpolates smoothly and clamps outside the configured range', () => {
++    expect(interpolateCurve(points, 10)).toBe(40);
++    expect(interpolateCurve(points, 25)).toBe(50);
++    expect(interpolateCurve(points, 40)).toBe(80);
++    expect(interpolateCurve(points, 60)).toBe(100);
++  });
++
++  it('validates variable-length monotonic curves with a 100% endpoint', () => {
++    expect(curveIsValid(points)).toBe(true);
++    expect(curveIsValid(points.slice(0, 1))).toBe(false);
++    expect(
++      curveIsValid([
++        points[0],
++        { temperature: 30, output: 90 },
++        { temperature: 50, output: 80 },
++      ]),
++    ).toBe(false);
++    expect(
++      curveIsValid([points[0], points[1], { temperature: 50, output: 90 }]),
++    ).toBe(false);
++  });
++
++  it('constrains dragged points between their neighbors', () => {
++    expect(constrainCurvePoint(points, 1, 55, 20)).toEqual({
++      temperature: 49.9,
++      output: 40,
++    });
++    expect(constrainCurvePoint(points, 2, 45, 20)).toEqual({
++      temperature: 45,
++      output: 100,
++    });
++  });
++
++  it('adds control points without restoring a fixed grid', () => {
++    const inserted = insertPointInWidestGap(points);
++    expect(inserted).toHaveLength(4);
++    expect(inserted[2]).toEqual({ temperature: 40, output: 80 });
++
++    const chartInserted = insertCurvePoint(points, 25, 55);
++    expect(chartInserted).toHaveLength(4);
++    expect(chartInserted[1]).toEqual({ temperature: 25, output: 55 });
++  });
++});
 -- 
-2.50.1 (Apple Git-155)
+2.55.0

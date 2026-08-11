@@ -1,0 +1,167 @@
+From 9dc0b80752d5f833afe7a6dd7f1aabce412f62b8 Mon Sep 17 00:00:00 2001
+From: Codex <codex@openai.com>
+Date: Tue, 11 Aug 2026 16:20:00 +0200
+Subject: [PATCH] virtual-media: fix server-backed NBD lifetime
+
+Upstream-Status: Pending [requires hardware validation on current NBD stack]
+
+The nbd-client nofork mode returns ESHUTDOWN for every read with the
+kernel/client combination used by trx40d8-2n2t.  Let nbd-client daemonize for
+legacy nbdkit-backed media and keep nbdkit's --run command alive by polling the
+connection instead.  Proxy mode retains its foreground client.
+
+Also remove the Unix socket after eject and treat the optional configfs LUN
+statistics file as unsupported when the kernel does not provide it.  Without
+that fallback the service logs an error every second and ejects active media
+after the inactivity timeout even while the host is reading it.
+
+---
+ src/configuration.hpp            |  9 +++++++--
+ src/state/activating_state.cpp   | 10 ++++++++--
+ src/state/active_state.hpp       |  6 +++++-
+ src/state/deactivating_state.hpp | 10 ++++++++++
+ src/system.hpp                   |  2 --
+ tests/src/main.cpp               | 23 +++++++++++++++++++++++
+ 6 files changed, 53 insertions(+), 7 deletions(-)
+
+diff --git a/src/configuration.hpp b/src/configuration.hpp
+index 068f478..b677aa8 100644
+--- a/src/configuration.hpp
++++ b/src/configuration.hpp
+@@ -46,13 +46,18 @@ class Configuration
+         std::chrono::seconds remainingInactivityTimeout;
+         Mode mode;
+ 
+-        static std::vector<std::string> toArgs(const MountPoint& mp)
++        static std::vector<std::string> toArgs(const MountPoint& mp,
++                                               bool noFork = true)
+         {
+             const auto timeout =
+                 std::to_string(mp.timeout.value_or(defaultTimeout));
+             std::vector<std::string> args = {
+                 "-t", timeout, "-u", mp.unixSocket, mp.nbdDevice.to_path(),
+-                "-n"};
++            };
++            if (noFork)
++            {
++                args.emplace_back("-n");
++            }
+             return args;
+         }
+     };
+diff --git a/src/state/activating_state.cpp b/src/state/activating_state.cpp
+index 0a277e8..34cd45d 100644
+--- a/src/state/activating_state.cpp
++++ b/src/state/activating_state.cpp
+@@ -255,10 +255,17 @@ ActivatingState::spawnNbdKit(interfaces::MountPointStateMachine& machine,
+         }
+     }
+ 
++    const auto device = machine.getConfig().nbdDevice.to_path().string();
+     std::string nbdClient =
+         "/usr/sbin/nbd-client " +
+         boost::algorithm::join(
+-            Configuration::MountPoint::toArgs(machine.getConfig()), " ");
++            Configuration::MountPoint::toArgs(machine.getConfig(), false),
++            " ") +
++        " && while /usr/sbin/nbd-client -c " + device +
++        " >/dev/null 2>&1; do sleep 1; done";
++
++    LogMsg(Logger::Debug, machine.getName(), " nbdkit run command: ",
++           nbdClient);
+ 
+     std::vector<std::string> args = {
+         // Listen for client on this unix socket...
+diff --git a/src/state/active_state.hpp b/src/state/active_state.hpp
+index f8df145..550a6ac 100644
+--- a/src/state/active_state.hpp
++++ b/src/state/active_state.hpp
+@@ -32,7 +32,12 @@ struct ActiveState : public BasicStateT<ActiveState>
+             auto now = std::chrono::steady_clock::now();
+ 
+             auto stats = UsbGadget::getStats(std::string(machine.getName()));
+-            if (stats && (*stats != lastStats))
++            if (!stats)
++            {
++                // Kernels without LUN statistics cannot support idle eject.
++                lastAccess = now;
++            }
++            else if (*stats != lastStats)
+             {
+                 lastStats = std::move(*stats);
+                 lastAccess = now;
+diff --git a/src/state/deactivating_state.hpp b/src/state/deactivating_state.hpp
+index b5f3f4f..43d0262 100644
+--- a/src/state/deactivating_state.hpp
++++ b/src/state/deactivating_state.hpp
+@@ -3,6 +3,8 @@
+ #include "basic_state.hpp"
+ #include "ready_state.hpp"
+ 
++#include <filesystem>
++
+ struct DeactivatingState : public BasicStateT<DeactivatingState>
+ {
+     using BasicStateT<DeactivatingState>::handleEvent;
+@@ -60,6 +62,14 @@ struct DeactivatingState : public BasicStateT<DeactivatingState>
+     {
+         if (udevStateChangeEvent && subprocessStoppedEvent)
+         {
++            std::error_code ec;
++            std::filesystem::remove(machine.getConfig().unixSocket, ec);
++            if (ec && ec != std::errc::no_such_file_or_directory)
++            {
++                LogMsg(Logger::Error, machine.getName(),
++                       " failed to remove NBD socket: ", ec);
++            }
++
+             if (udevStateChangeEvent->devState == StateChange::removed)
+             {
+                 LogMsg(Logger::Info, machine.getName(),
+diff --git a/src/system.hpp b/src/system.hpp
+index 01967af..03c6e31 100644
+--- a/src/system.hpp
++++ b/src/system.hpp
+@@ -697,7 +697,6 @@ class UsbGadget : private FsHelper
+         std::ifstream ifs(statsPath);
+         if (!ifs.is_open())
+         {
+-            LogMsg(Logger::Error, name, "Failed to open ", statsPath);
+             return {};
+         }
+ 
+diff --git a/tests/src/main.cpp b/tests/src/main.cpp
+index 97c7bb2..9aaea3c 100644
+--- a/tests/src/main.cpp
++++ b/tests/src/main.cpp
+@@ -1,3 +1,4 @@
++#include "configuration.hpp"
+ #include "system.hpp"
+ 
+ #include <gtest/gtest.h>
+@@ -58,6 +59,23 @@ TEST(UsbGadgetUdcSelection, TwoSlotsAreUniqueAndReleasedPortIsReusable)
+               slot1);
+ }
+ 
++TEST(NbdClientArguments, LegacyCanDaemonizeWithoutChangingProxyMode)
++{
++    Configuration::MountPoint mp{};
++    mp.nbdDevice = NBDDevice(NBDDevice::nbd2);
++    mp.unixSocket = "/run/virtual-media/nbd2.sock";
++    mp.timeout = 90;
++
++    const std::vector<std::string> foreground = {
++        "-t", "90", "-u", "/run/virtual-media/nbd2.sock", "/dev/nbd2",
++        "-n"};
++    const std::vector<std::string> daemon = {
++        "-t", "90", "-u", "/run/virtual-media/nbd2.sock", "/dev/nbd2"};
++
++    EXPECT_EQ(Configuration::MountPoint::toArgs(mp), foreground);
++    EXPECT_EQ(Configuration::MountPoint::toArgs(mp, false), daemon);
++}
++
+ int main(int argc, char** argv)
+ {
+     ::testing::InitGoogleTest(&argc, argv);
+-- 
+2.50.1

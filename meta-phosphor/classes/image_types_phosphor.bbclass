@@ -406,7 +406,9 @@ do_generate_static_alltar() {
 
 }
 do_generate_static_alltar[vardepsexclude] = "DATETIME"
-do_generate_static_alltar[dirs] = "${S}/static"
+# Keep signing workspaces isolated because the tar tasks can run in parallel
+# and both create fixed names such as image-full.sig.
+do_generate_static_alltar[dirs] = "${WORKDIR}/static-alltar"
 do_generate_static_alltar[depends] += " \
         openssl-native:do_populate_sysroot \
         ${SIGNING_KEY_DEPENDS} \
@@ -451,11 +453,12 @@ do_generate_static_tar() {
     cd ${IMGDEPLOYDIR}
     ln -sf ${IMAGE_NAME}.static.mtd.tar ${IMGDEPLOYDIR}/${MACHINE}-${DATETIME}.tar
 }
-do_generate_static_tar[dirs] = " ${S}/static"
+do_generate_static_tar[dirs] = "${WORKDIR}/static-tar"
 do_generate_static_tar[depends] += " \
         ${PN}:do_image_${@d.getVar('IMAGE_BASETYPE', True).replace('-', '_')} \
         virtual/kernel:do_deploy \
         u-boot:do_deploy \
+        ${@'linux-yocto-fitimage:do_deploy' if d.getVar('INITRAMFS_IMAGE') else ''} \
         openssl-native:do_populate_sysroot \
         ${SIGNING_KEY_DEPENDS} \
         ${PN}:do_copy_signing_pubkey \

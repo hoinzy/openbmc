@@ -1,0 +1,30 @@
+From 49e059d4256bd2beb4867f3101ed7e4409084dde Mon Sep 17 00:00:00 2001
+From: Codex <codex@openai.com>
+Date: Tue, 11 Aug 2026 17:04:00 +0200
+Subject: [PATCH] hwmon-temp: add NCT6796 I2C device type
+
+The NCT6775 I2C kernel driver exposes the NCT6796 back-door interface under
+the nct6796 new-device name.  Allow Entity Manager configurations to request
+that exact device instead of probing it with the incompatible nct6779 name.
+
+Upstream-Status: Pending
+Signed-off-by: Codex <codex@openai.com>
+---
+ src/hwmon-temp/HwmonTempMain.cpp | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/hwmon-temp/HwmonTempMain.cpp b/src/hwmon-temp/HwmonTempMain.cpp
+index 0000000..1111111 100644
+--- a/src/hwmon-temp/HwmonTempMain.cpp
++++ b/src/hwmon-temp/HwmonTempMain.cpp
+@@ -83,6 +83,7 @@ static constexpr auto sensorTypes =
+         {"MAX6639", I2CDeviceType{"max6639", true}},
+         {"MCP9600", I2CDeviceType{"mcp9600", false}},
+         {"NCT6779", I2CDeviceType{"nct6779", true}},
++        {"NCT6796", I2CDeviceType{"nct6796", true}},
+         {"NCT7802", I2CDeviceType{"nct7802", true}},
+         {"PT5161L", I2CDeviceType{"pt5161l", true}},
+         {"SBTSI", I2CDeviceType{"sbtsi", true}},
+-- 
+2.51.0
+
