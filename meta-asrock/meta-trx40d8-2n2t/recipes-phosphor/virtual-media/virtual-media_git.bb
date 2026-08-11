@@ -12,6 +12,7 @@ SRC_URI = " \
     file://0003-virtual-media-use-Boost.Process-v1-compatibility-API.patch \
     file://0004-virtual-media-update-for-current-sdbusplus-and-Boost.patch \
     file://0005-virtual-media-assign-and-validate-USB-controllers.patch \
+    file://0006-virtual-media-fix-server-backed-NBD-lifetime.patch \
     file://virtual-media.json \
     "
 SRCREV = "1306c2132bdb9d5ad6deb00cd8a1d920753f7ea7"
